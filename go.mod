@@ -23,6 +23,7 @@ require (
 	github.com/ethereum/go-ethereum v1.9.19
 	github.com/fatih/structs v1.1.0
 	github.com/gernest/mention v2.0.0+incompatible
+	github.com/go-pg/pg/v10 v10.10.0 // indirect
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/snappy v0.0.2 // indirect
@@ -58,11 +59,11 @@ require (
 	github.com/unrolled/secure v1.0.8
 	github.com/xdg/stringprep v1.0.0 // indirect
 	go.mongodb.org/mongo-driver v1.4.5
-	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
+	go.opentelemetry.io/otel v0.19.0 // indirect
+	golang.org/x/crypto v0.0.0-20210421170649-83a5a9bb288b
 	golang.org/x/mod v0.4.2 // indirect
 	golang.org/x/net v0.0.0-20210415231046-e915ea6b2b7d // indirect
 	golang.org/x/oauth2 v0.0.0-20210413134643-5e61552d6c78 // indirect
-	golang.org/x/sys v0.0.0-20210415045647-66c3f260301c // indirect
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324 // indirect
 	google.golang.org/api v0.44.0
 	google.golang.org/genproto v0.0.0-20210416161957-9910b6c460de // indirect
