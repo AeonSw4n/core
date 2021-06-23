@@ -3,6 +3,7 @@ package lib
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/go-pg/pg/v10"
 	"net"
 	"runtime"
 	"strings"
@@ -278,6 +279,7 @@ func NewServer(
 	_bitcloutAddrMgr *addrmgr.AddrManager,
 	_connectIps []string,
 	_db *badger.DB,
+	postgres *pg.DB,
 	_targetOutboundPeers uint32,
 	_maxInboundPeers uint32,
 	_minerPublicKeys []string,
@@ -350,7 +352,7 @@ func NewServer(
 	_chain, err := NewBlockchain(
 		_trustedBlockProducerPublicKeys,
 		_trustedBlockProducerStartHeight,
-		_params, timesource, _db, _bitcoinManager, srv)
+		_params, timesource, _db, _bitcoinManager, postgres, srv)
 	if err != nil {
 		return nil, errors.Wrapf(err, "NewServer: Problem initializing blockchain")
 	}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-pg/pg/v10"
+
 	chainlib "github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/davecgh/go-spew/spew"
@@ -276,6 +278,7 @@ type OrphanBlock struct {
 
 type Blockchain struct {
 	db                              *badger.DB
+	postgres                        *pg.DB
 	bitcoinManager                  *BitcoinManager
 	timeSource                      chainlib.MedianTimeSource
 	trustedBlockProducerPublicKeys  map[PkMapKey]bool
@@ -435,29 +438,34 @@ func (bc *Blockchain) _initChain() error {
 // db, and one should never run two blockhain objects over the same db at the same
 // time as they will likely step on each other and become inconsistent.
 func NewBlockchain(
-	_trustedBlockProducerPublicKeyStrs []string,
-	_trustedBlockProducerStartHeight uint64,
-	_params *BitCloutParams, _timeSource chainlib.MedianTimeSource,
-	_db *badger.DB, _bitcoinManager *BitcoinManager,
-	_server *Server) (*Blockchain, error) {
+	trustedBlockProducerPublicKeyStrs []string,
+	trustedBlockProducerStartHeight uint64,
+	params *BitCloutParams,
+	timeSource chainlib.MedianTimeSource,
+	db *badger.DB,
+	bitcoinManager *BitcoinManager,
+	postgres *pg.DB,
+	server *Server,
+) (*Blockchain, error) {
 
-	_trustedBlockProducerPublicKeys := make(map[PkMapKey]bool)
-	for _, keyStr := range _trustedBlockProducerPublicKeyStrs {
+	trustedBlockProducerPublicKeys := make(map[PkMapKey]bool)
+	for _, keyStr := range trustedBlockProducerPublicKeyStrs {
 		pkBytes, _, err := Base58CheckDecode(keyStr)
 		if err != nil {
 			return nil, fmt.Errorf("Error decoding trusted block producer public key: %v", err)
 		}
-		_trustedBlockProducerPublicKeys[MakePkMapKey(pkBytes)] = true
+		trustedBlockProducerPublicKeys[MakePkMapKey(pkBytes)] = true
 	}
 
 	bc := &Blockchain{
-		db:                              _db,
-		bitcoinManager:                  _bitcoinManager,
-		timeSource:                      _timeSource,
-		trustedBlockProducerPublicKeys:  _trustedBlockProducerPublicKeys,
-		trustedBlockProducerStartHeight: _trustedBlockProducerStartHeight,
-		params:                          _params,
-		server:                          _server,
+		db:                              db,
+		postgres:                        postgres,
+		bitcoinManager:                  bitcoinManager,
+		timeSource:                      timeSource,
+		trustedBlockProducerPublicKeys:  trustedBlockProducerPublicKeys,
+		trustedBlockProducerStartHeight: trustedBlockProducerStartHeight,
+		params:                          params,
+		server:                          server,
 
 		blockIndex:   make(map[BlockHash]*BlockNode),
 		bestChainMap: make(map[BlockHash]*BlockNode),
@@ -1629,6 +1637,14 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 	// it as invalid (which would be a bug but this behavior allows us to handle
 	// it more gracefully).
 	nodeToValidate.Status |= StatusBlockProcessed
+
+	//if bc.postgres != nil {
+	//	if err := UpsertBlock(bc.postgres, nodeToValidate); err != nil {
+	//		// TODO: Make this a hard failure
+	//		glog.Errorf("ProcessBlock: Problem saving block with StatusBlockProcessed: %v", err)
+	//	}
+	//}
+
 	if err := PutHeightHashToNodeInfo(nodeToValidate, bc.db, false /*bitcoinNodes*/); err != nil {
 		return false, false, errors.Wrapf(
 			err, "ProcessBlock: Problem calling PutHeightHashToNodeInfo with StatusBlockProcessed")
@@ -1714,6 +1730,14 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 	// Try and store the block and its corresponding node info since it has passed
 	// basic validation.
 	nodeToValidate.Status |= StatusBlockStored
+
+	//if bc.postgres != nil {
+	//	if err := UpsertBlock(bc.postgres, nodeToValidate); err != nil {
+	//		// TODO: Make this a hard failure
+	//		glog.Errorf("ProcessBlock: Problem saving block with StatusBlockStored: %v", err)
+	//	}
+	//}
+
 	err = bc.db.Update(func(txn *badger.Txn) error {
 		// Store the new block in the db under the
 		//   <blockHash> -> <serialized block>
@@ -1726,15 +1750,13 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		//   <height uin32, blockhash BlockHash> -> <node info>
 		// index.
 		if err := PutHeightHashToNodeInfoWithTxn(txn, nodeToValidate, false /*bitcoinNodes*/); err != nil {
-			return errors.Wrapf(err,
-				"ProcessBlock: Problem calling PutHeightHashToNodeInfo before validation")
+			return errors.Wrapf(err, "ProcessBlock: Problem calling PutHeightHashToNodeInfo before validation")
 		}
 
 		return nil
 	})
 	if err != nil {
-		return false, false, errors.Wrapf(
-			err, "ProcessBlock: Problem storing block after basic validation")
+		return false, false, errors.Wrapf(err, "ProcessBlock: Problem storing block after basic validation")
 	}
 
 	// Now we try and add the block to the main block chain (note that it should
@@ -1786,6 +1808,13 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		// Now that we have a valid block that we know is connecting to the tip,
 		// update our data structures to actually make this connection. Do this
 		// in a transaction so that it is atomic.
+		if bc.postgres != nil {
+			if err := UpsertBlockAndTransactions(bc.postgres, nodeToValidate, bitcloutBlock); err != nil {
+				// TODO: Make this a hard failure
+				glog.Errorf("ProcessBlock: Problem saving block with StatusBlockStored: %v", err)
+			}
+		}
+
 		err = bc.db.Update(func(txn *badger.Txn) error {
 			// This will update the node's status.
 			if err := PutHeightHashToNodeInfoWithTxn(txn, nodeToValidate, false /*bitcoinNodes*/); err != nil {

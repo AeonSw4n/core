@@ -56,6 +56,7 @@ func SetupRunFlags(cmd *cobra.Command) {
 			"ids to transaction information. This enables the use of certain API calls "+
 			"like ones that allow the lookup of particular transactions by their ID. "+
 			"Defaults to false because the index can be large.")
+	cmd.PersistentFlags().String("postgres-uri", "", "URI for syncing the node with postgres")
 
 	// Peers
 	cmd.PersistentFlags().StringSlice("connect-ips", []string{},

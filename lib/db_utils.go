@@ -2360,39 +2360,6 @@ func _heightHashToNodeIndexKey(height uint32, hash *BlockHash, bitcoinNodes bool
 	return key
 }
 
-func GetHeightHashToNodeInfoWithTxn(
-	txn *badger.Txn, height uint32, hash *BlockHash, bitcoinNodes bool) *BlockNode {
-
-	key := _heightHashToNodeIndexKey(height, hash, bitcoinNodes)
-	nodeValue, err := txn.Get(key)
-	if err != nil {
-		return nil
-	}
-	var blockNode *BlockNode
-	nodeValue.Value(func(nodeBytes []byte) error {
-		blockNode, err = DeserializeBlockNode(nodeBytes)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil
-	}
-	return blockNode
-}
-
-func GetHeightHashToNodeInfo(
-	handle *badger.DB, height uint32, hash *BlockHash, bitcoinNodes bool) *BlockNode {
-
-	var blockNode *BlockNode
-	handle.View(func(txn *badger.Txn) error {
-		blockNode = GetHeightHashToNodeInfoWithTxn(txn, height, hash, bitcoinNodes)
-		return nil
-	})
-	return blockNode
-}
-
 func PutHeightHashToNodeInfoWithTxn(txn *badger.Txn, node *BlockNode, bitcoinNodes bool) error {
 
 	key := _heightHashToNodeIndexKey(node.Height, node.Hash, bitcoinNodes)

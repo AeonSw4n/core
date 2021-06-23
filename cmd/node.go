@@ -4,12 +4,14 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/DataDog/datadog-go/statsd"
-	"github.com/bitclout/core/lib"
 	"net"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/DataDog/datadog-go/statsd"
+	"github.com/bitclout/core/lib"
+	"github.com/go-pg/pg/v10"
 
 	"github.com/btcsuite/btcd/addrmgr"
 	"github.com/btcsuite/btcd/wire"
@@ -22,11 +24,12 @@ import (
 )
 
 type Node struct {
-	Server     *lib.Server
-	chainDB    *badger.DB
-	TXIndex    *lib.TXIndex
-	Params     *lib.BitCloutParams
-	Config     *Config
+	Server   *lib.Server
+	chainDB  *badger.DB
+	Postgres *pg.DB
+	TXIndex  *lib.TXIndex
+	Params   *lib.BitCloutParams
+	Config   *Config
 }
 
 func NewNode(config *Config) *Node {
@@ -113,6 +116,16 @@ func (node *Node) Start() {
 		lib.StartDBSummarySnapshots(node.chainDB)
 	}
 
+	// Setup postgres
+	if node.Config.PostgresURI != "" {
+		options, err := pg.ParseURL(node.Config.PostgresURI)
+		if err != nil {
+			glog.Fatal(err)
+		} else {
+			node.Postgres = pg.Connect(options)
+		}
+	}
+
 	// Setup the server
 	node.Server, err = lib.NewServer(
 		node.Params,
@@ -120,6 +133,7 @@ func (node *Node) Start() {
 		bitcloutAddrMgr,
 		node.Config.ConnectIPs,
 		node.chainDB,
+		node.Postgres,
 		node.Config.TargetOutboundPeers,
 		node.Config.MaxInboundPeers,
 		node.Config.MinerPublicKeys,
@@ -162,7 +176,7 @@ func (node *Node) Start() {
 	}
 }
 
-func (node* Node) Stop() {
+func (node *Node) Stop() {
 	node.Server.Stop()
 	node.chainDB.Close()
 	node.TXIndex.Stop()

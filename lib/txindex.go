@@ -126,7 +126,7 @@ func NewTXIndex(coreChain *Blockchain, bitcoinManager *BitcoinManager, params *B
 	txIndexChain, err := NewBlockchain(
 		[]string{}, 0,
 		params, chainlib.NewMedianTime(), txIndexDb,
-		bitcoinManager, nil)
+		bitcoinManager, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("NewTXIndex: Error initializing TxIndex: %v", err)
 	}
