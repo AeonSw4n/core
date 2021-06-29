@@ -1775,15 +1775,15 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		// the txns to account for txns that spend previous txns in the block, but it would
 		// almost certainly be more efficient than doing a separate db call for each input
 		// and output.
-		utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager)
+		utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager, bc.postgres)
 		if err != nil {
 			return false, false, errors.Wrapf(err, "ProcessBlock: Problem initializing UtxoView in simple connect to tip")
 		}
 		// Verify that the utxo view is pointing to the current tip.
-		if *utxoView.TipHash != *currentTip.Hash {
-			return false, false, fmt.Errorf("ProcessBlock: Tip hash for utxo view (%v) is "+
-				"not the current tip hash (%v)", *utxoView.TipHash, *currentTip)
-		}
+		//if *utxoView.TipHash != *currentTip.Hash {
+		//	return false, false, fmt.Errorf("ProcessBlock: Tip hash for utxo view (%v) is "+
+		//		"not the current tip hash (%v)", *utxoView.TipHash, *currentTip)
+		//}
 
 		utxoOpsForBlock, err := utxoView.ConnectBlock(
 			bitcloutBlock, txHashes, verifySignatures)
@@ -1811,36 +1811,36 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		if bc.postgres != nil {
 			if err := UpsertBlockAndTransactions(bc.postgres, nodeToValidate, bitcloutBlock); err != nil {
 				// TODO: Make this a hard failure
-				glog.Errorf("ProcessBlock: Problem saving block with StatusBlockStored: %v", err)
+				return false, false, errors.Wrapf(err, "ProcessBlock: Problem saving block with StatusBlockStored")
 			}
+		} else {
+			err = bc.db.Update(func(txn *badger.Txn) error {
+				// This will update the node's status.
+				if err := PutHeightHashToNodeInfoWithTxn(txn, nodeToValidate, false /*bitcoinNodes*/); err != nil {
+					return errors.Wrapf(
+						err, "ProcessBlock: Problem calling PutHeightHashToNodeInfo after validation")
+				}
+
+				// Set the best node hash to this one. Note the header chain should already
+				// be fully aware of this block so we shouldn't update it here.
+				if err := PutBestHashWithTxn(txn, blockHash, ChainTypeBitCloutBlock); err != nil {
+					return err
+				}
+
+				// Write the modified utxo set to the view.
+				if err := utxoView.FlushToDbWithTxn(txn); err != nil {
+					return errors.Wrapf(err, "ProcessBlock: Problem writing utxo view to db on simple add to tip")
+				}
+
+				// Write the utxo operations for this block to the db so we can have the
+				// ability to roll it back in the future.
+				if err := PutUtxoOperationsForBlockWithTxn(txn, blockHash, utxoOpsForBlock); err != nil {
+					return errors.Wrapf(err, "ProcessBlock: Problem writing utxo operations to db on simple add to tip")
+				}
+
+				return nil
+			})
 		}
-
-		err = bc.db.Update(func(txn *badger.Txn) error {
-			// This will update the node's status.
-			if err := PutHeightHashToNodeInfoWithTxn(txn, nodeToValidate, false /*bitcoinNodes*/); err != nil {
-				return errors.Wrapf(
-					err, "ProcessBlock: Problem calling PutHeightHashToNodeInfo after validation")
-			}
-
-			// Set the best node hash to this one. Note the header chain should already
-			// be fully aware of this block so we shouldn't update it here.
-			if err := PutBestHashWithTxn(txn, blockHash, ChainTypeBitCloutBlock); err != nil {
-				return err
-			}
-
-			// Write the modified utxo set to the view.
-			if err := utxoView.FlushToDbWithTxn(txn); err != nil {
-				return errors.Wrapf(err, "ProcessBlock: Problem writing utxo view to db on simple add to tip")
-			}
-
-			// Write the utxo operations for this block to the db so we can have the
-			// ability to roll it back in the future.
-			if err := PutUtxoOperationsForBlockWithTxn(txn, blockHash, utxoOpsForBlock); err != nil {
-				return errors.Wrapf(err, "ProcessBlock: Problem writing utxo operations to db on simple add to tip")
-			}
-
-			return nil
-		})
 
 		if err != nil {
 			return false, false, errors.Wrapf(err, "ProcessBlock: Problem writing block info to db on simple add to tip")
@@ -1920,7 +1920,7 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		// the txns to account for txns that spend previous txns in the block, but it would
 		// almost certainly be more efficient than doing a separate db call for each input
 		// and output
-		utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager)
+		utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager, bc.postgres)
 		if err != nil {
 			return false, false, errors.Wrapf(err, "processblock: Problem initializing UtxoView in reorg")
 		}
@@ -2188,7 +2188,7 @@ func (bc *Blockchain) ValidateTransaction(
 
 	// Create a new UtxoView. If we have access to a mempool object, use it to
 	// get an augmented view that factors in pending transactions.
-	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager)
+	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager, bc.postgres)
 	if err != nil {
 		return errors.Wrapf(err, "ValidateTransaction: Problem Problem creating new utxo view: ")
 	}
@@ -2297,7 +2297,7 @@ func ComputeMerkleRoot(txns []*MsgBitCloutTxn) (_merkle *BlockHash, _txHashes []
 func (bc *Blockchain) GetSpendableUtxosForPublicKey(spendPublicKeyBytes []byte, mempool *BitCloutMempool, referenceUtxoView *UtxoView) ([]*UtxoEntry, error) {
 	// If we have access to a mempool, use it to account for utxos we might not
 	// get otherwise.
-	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager)
+	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager, bc.postgres)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Blockchain.GetSpendableUtxosForPublicKey: Problem initializing UtxoView: ")
 	}
@@ -2914,7 +2914,7 @@ func (bc *Blockchain) CreateCreatorCoinTransferTxnWithDiamonds(
 
 	// Create a new UtxoView. If we have access to a mempool object, use it to
 	// get an augmented view that factors in pending transactions.
-	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager)
+	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager, bc.postgres)
 	if err != nil {
 		return nil, 0, 0, 0, errors.Wrapf(err,
 			"Blockchain.CreateCreatorCoinTransferTxnWithDiamonds: "+
@@ -3256,7 +3256,7 @@ func (bc *Blockchain) EstimateDefaultFeeRateNanosPerKB(
 
 	// If the block is more than X% full, use the maximum between the min
 	// fee rate and the median fees of all the transactions in the block.
-	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager)
+	utxoView, err := NewUtxoView(bc.db, bc.params, bc.bitcoinManager, bc.postgres)
 	if err != nil {
 		return minFeeRateNanosPerKB
 	}

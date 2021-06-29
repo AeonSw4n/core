@@ -67,11 +67,14 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE transaction_outputs (
-				id           BIGSERIAL PRIMARY KEY,
 				output_hash  BYTEA  NOT NULL,
 				output_index INT    NOT NULL,
+				output_type  SMALLINT NOT NULL,
 				public_key   BYTEA  NOT NULL,
-				amount_nanos BIGINT NOT NULL
+				amount_nanos BIGINT NOT NULL,
+				spent        BOOL   NOT NULL,
+
+				PRIMARY KEY (output_hash, output_index)
 			);
 		`)
 		if err != nil {
@@ -138,12 +141,11 @@ func init() {
 		_, err = db.Exec(`
 			CREATE TABLE metadata_update_profiles (
 				id BIGSERIAL PRIMARY KEY,
-				profile_public_key       BYTEA  NOT NULL,
-				new_username             BYTEA  NOT NULL,
-				new_description          BYTEA  NOT NULL,
-				new_profile_pic          BYTEA  NOT NULL,
-				new_creator_basis_points BIGINT NOT NULL,
-				is_hidden                BOOL   NOT NULL
+				profile_public_key       BYTEA,
+				new_username             BYTEA,
+				new_description          BYTEA,
+				new_profile_pic          BYTEA,
+				new_creator_basis_points BIGINT NOT NULL
 			);
 		`)
 		if err != nil {
@@ -211,6 +213,19 @@ func init() {
 			return err
 		}
 
+		_, err = db.Exec(`
+			CREATE TABLE utxo_entries (
+				id BIGSERIAL PRIMARY KEY,
+				amount_nanos BIGINT NOT NULL,
+				public_key   BYTEA NOT NULL,
+				block_height BIGINT NOT NULL,
+				utxo_type    SMALLINT NOT NULL
+			);
+		`)
+		if err != nil {
+			return err
+		}
+
 		return nil
 	}
 
@@ -232,6 +247,7 @@ func init() {
 			DROP TABLE metadata_creator_coins;
 			DROP TABLE metadata_creator_coin_transfers;
 			DROP TABLE metadata_swap_identities;
+			DROP TABLE utxo_entries;
 		`)
 		return err
 	}

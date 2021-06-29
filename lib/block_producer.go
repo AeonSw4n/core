@@ -189,7 +189,7 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 
 		// Create a new view object.
 		utxoView, err := NewUtxoView(
-			bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.bitcoinManager)
+			bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.bitcoinManager, nil)
 		if err != nil {
 			return nil, nil, nil, errors.Wrapf(err,
 				"BitCloutBlockProducer._getBlockTemplate: Error generating checker UtxoView: ")
@@ -277,7 +277,7 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 
 	// Compute the total fee the BlockProducer should get.
 	totalFeeNanos := uint64(0)
-	feesUtxoView, err := NewUtxoView(bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.bitcoinManager)
+	feesUtxoView, err := NewUtxoView(bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.bitcoinManager, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf(
 			"BitCloutBlockProducer._getBlockTemplate: Error generating UtxoView to compute txn fees: %v", err)

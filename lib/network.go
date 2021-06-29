@@ -3371,6 +3371,7 @@ type UpdateProfileMetadata struct {
 	NewStakeMultipleBasisPoints uint64
 
 	// Profile is hidden from the UI when this field is true.
+	// TODO: This field is deprecated; delete it.
 	IsHidden bool
 }
 

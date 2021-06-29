@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/go-pg/pg/v10"
 	"math"
 	"math/big"
 	"reflect"
@@ -768,6 +769,7 @@ type UtxoView struct {
 
 	BitcoinManager *BitcoinManager
 	Handle         *badger.DB
+	Postgres       *pg.DB
 	Params         *BitCloutParams
 }
 
@@ -961,7 +963,7 @@ func (bav *UtxoView) _ResetViewMappingsAfterFlush() {
 }
 
 func (bav *UtxoView) CopyUtxoView() (*UtxoView, error) {
-	newView, err := NewUtxoView(bav.Handle, bav.Params, bav.BitcoinManager)
+	newView, err := NewUtxoView(bav.Handle, bav.Params, bav.BitcoinManager, bav.Postgres)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,10 +1070,15 @@ func (bav *UtxoView) CopyUtxoView() (*UtxoView, error) {
 }
 
 func NewUtxoView(
-	_handle *badger.DB, _params *BitCloutParams, _bitcoinManager *BitcoinManager) (*UtxoView, error) {
+	_handle *badger.DB,
+	_params *BitCloutParams,
+	_bitcoinManager *BitcoinManager,
+	_postgres *pg.DB,
+) (*UtxoView, error) {
 
 	view := UtxoView{
 		Handle:         _handle,
+		Postgres:       _postgres,
 		Params:         _params,
 		BitcoinManager: _bitcoinManager,
 		// Note that the TipHash does not get reset as part of
@@ -1127,7 +1134,11 @@ func (bav *UtxoView) GetUtxoEntryForUtxoKey(utxoKey *UtxoKey) *UtxoEntry {
 	// If the utxo entry isn't in our in-memory data structure, fetch it from the
 	// db.
 	if !ok {
-		utxoEntry = DbGetUtxoEntryForUtxoKey(bav.Handle, utxoKey)
+		if bav.Postgres != nil {
+			utxoEntry = PgGetUtxoEntryForUtxoKey(bav.Postgres, utxoKey)
+		} else {
+			utxoEntry = DbGetUtxoEntryForUtxoKey(bav.Handle, utxoKey)
+		}
 		if utxoEntry == nil {
 			// This means the utxo is neither in our map nor in the db so
 			// it doesn't exist. Return nil to signal that in this case.
@@ -7558,43 +7569,34 @@ func (bav *UtxoView) _flushBalanceEntriesToDbWithTxn(txn *badger.Txn) error {
 }
 
 func (bav *UtxoView) FlushToDbWithTxn(txn *badger.Txn) error {
-	// Flush the utxos to the db.
+	// Flush to BadgerDB.
 	if err := bav._flushUtxosToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushBitcoinExchangeDataWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushGlobalParamsEntryToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushForbiddenPubKeyEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushMessageEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushLikeEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushFollowEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushDiamondEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushRecloutEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
-
 	if err := bav._flushPostEntriesToDbWithTxn(txn); err != nil {
 		return err
 	}
@@ -7613,9 +7615,21 @@ func (bav *UtxoView) FlushToDbWithTxn(txn *badger.Txn) error {
 
 func (bav *UtxoView) FlushToDb() error {
 	// Make sure everything happens inside a single transaction.
-	err := bav.Handle.Update(func(txn *badger.Txn) error {
-		return bav.FlushToDbWithTxn(txn)
-	})
+	var err error
+	if bav.Postgres != nil {
+		err = bav.Postgres.RunInTransaction(bav.Postgres.Context(), func(tx *pg.Tx) error {
+			if err := bav.flushUtxosToPg(tx); err != nil {
+				return err
+			}
+
+			return nil
+		})
+	} else {
+		err = bav.Handle.Update(func(txn *badger.Txn) error {
+			return bav.FlushToDbWithTxn(txn)
+		})
+	}
+
 	if err != nil {
 		return err
 	}
@@ -7628,6 +7642,40 @@ func (bav *UtxoView) FlushToDb() error {
 	// is consistent with the view regardless of whether or not the view is flushed or
 	// not.
 	bav._ResetViewMappingsAfterFlush()
+
+	return nil
+}
+
+func (bav *UtxoView) flushUtxosToPg(tx *pg.Tx) error {
+	glog.Infof("flushUtxosToPg: flushing %d mappings", len(bav.UtxoKeyToUtxoEntry))
+
+	numSpent := 0
+	var spentOutputs []TransactionOutput
+
+	for utxoKeyIter, utxoEntry := range bav.UtxoKeyToUtxoEntry {
+		// Make a copy of the iterator since it might change from under us.
+		utxoKey := utxoKeyIter
+
+		if utxoEntry.isSpent {
+			numSpent++
+			spentOutputs = append(spentOutputs, TransactionOutput{
+				OutputHash: &utxoKey.TxID,
+				OutputIndex: utxoKey.Index,
+				PublicKey: utxoEntry.PublicKey,
+				AmountNanos: utxoEntry.AmountNanos,
+				Spent: true,
+			})
+		}
+	}
+
+	result, err := tx.Model(&spentOutputs).Column("spent").Update()
+	if err != nil {
+		return err
+	}
+
+	glog.Info(result.RowsAffected())
+	glog.Info(result.RowsReturned())
+	glog.Infof("flushUtxosToPg: marked %d mappings as spent", numSpent)
 
 	return nil
 }

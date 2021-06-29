@@ -55,11 +55,12 @@ type TransactionInput struct {
 
 // TransactionOutput represents BitCloutOutput
 type TransactionOutput struct {
-	ID          uint64
-	OutputHash  *BlockHash
-	OutputIndex uint32 `pg:",use_zero"`
+	OutputHash  *BlockHash `pg:",pk"`
+	OutputIndex uint32     `pg:",pk,use_zero"`
+	OutputType  UtxoType   `pg:",use_zero"`
 	PublicKey   []byte
-	AmountNanos uint64 `pg:",use_zero"`
+	AmountNanos uint64     `pg:",use_zero"`
+	Spent       bool       `pg:",use_zero"`
 }
 
 // MetadataBlockReward represents BlockRewardMetadataa
@@ -92,13 +93,13 @@ type MetadataSubmitPost struct {
 	ParentStakeID            []byte
 	Body                     []byte
 	TimestampNanos           uint64
-	IsHidden                 bool
+	IsHidden                 bool `pg:",use_zero"`
 }
 
 // MetadataUpdateBitcoinUSDExchangeRate represents UpdateBitcoinUSDExchangeRateMetadataa
 type MetadataUpdateBitcoinUSDExchangeRate struct {
 	ID                 uint64
-	USDCentsPerBitcoin uint64
+	USDCentsPerBitcoin uint64 `pg:",use_zero"`
 }
 
 // MetadataUpdateProfile represents UpdateProfileMetadata
@@ -108,41 +109,40 @@ type MetadataUpdateProfile struct {
 	NewUsername                 []byte
 	NewDescription              []byte
 	NewProfilePic               []byte
-	NewCreatorBasisPoints       uint64
-	IsHidden                    bool
+	NewCreatorBasisPoints       uint64 `pg:",use_zero"`
 }
 
 // MetadataFollow represents FollowMetadata
 type MetadataFollow struct {
 	ID                uint64
 	FollowedPublicKey []byte
-	IsUnfollow        bool
+	IsUnfollow        bool `pg:",use_zero"`
 }
 
 // MetadataLike represents LikeMetadata
 type MetadataLike struct {
 	ID            uint64
 	LikedPostHash *BlockHash
-	IsUnlike      bool
+	IsUnlike      bool `pg:",use_zero"`
 }
 
 // MetadataCreatorCoin represents CreatorCoinMetadataa
 type MetadataCreatorCoin struct {
 	ID                          uint64
 	ProfilePublicKey            []byte
-	OperationType               CreatorCoinOperationType
-	BitCloutToSellNanos         uint64
-	CreatorCoinToSellNanos      uint64
-	BitCloutToAddNanos          uint64
-	MinBitCloutExpectedNanos    uint64
-	MinCreatorCoinExpectedNanos uint64
+	OperationType               CreatorCoinOperationType `pg:",use_zero"`
+	BitCloutToSellNanos         uint64 `pg:",use_zero"`
+	CreatorCoinToSellNanos      uint64 `pg:",use_zero"`
+	BitCloutToAddNanos          uint64 `pg:",use_zero"`
+	MinBitCloutExpectedNanos    uint64 `pg:",use_zero"`
+	MinCreatorCoinExpectedNanos uint64 `pg:",use_zero"`
 }
 
 // MetadataCreatorCoinTransfer represents CreatorCoinTransferMetadataa
 type MetadataCreatorCoinTransfer struct {
 	ID                         uint64
 	ProfilePublicKey           []byte
-	CreatorCoinToTransferNanos uint64
+	CreatorCoinToTransferNanos uint64 `pg:",use_zero"`
 	ReceiverPublicKey          []byte
 }
 
@@ -211,7 +211,7 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 		// S:         BigintToHash(txn.Signature.S),
 	}
 
-	_, err := tx.Model(transaction).Insert()
+	_, err := tx.Model(transaction).Returning("NULL").Insert()
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 			InputIndex: input.Index,
 		}
 
-		_, err = tx.Model(transactionInput).Insert()
+		_, err = tx.Model(transactionInput).Returning("NULL").Insert()
 		if err != nil {
 			return err
 		}
@@ -233,11 +233,12 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 		transactionOutput := &TransactionOutput{
 			OutputHash:  txnHash,
 			OutputIndex: uint32(i),
+			OutputType:  0, // TODO
 			PublicKey:   output.PublicKey,
 			AmountNanos: output.AmountNanos,
 		}
 
-		_, err = tx.Model(transactionOutput).Insert()
+		_, err = tx.Model(transactionOutput).Returning("NULL").Insert()
 		if err != nil {
 			return err
 		}
@@ -247,22 +248,22 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 		// No extra metadata needed
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeBlockReward {
 		txMeta := txn.TxnMeta.(*BlockRewardMetadataa)
-		_, err = tx.Model(&BlockRewardMetadataa{
+		_, err = tx.Model(&MetadataBlockReward{
 			ExtraData: txMeta.ExtraData,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeBitcoinExchange {
 		txMeta := txn.TxnMeta.(*BitcoinExchangeMetadata)
 		_, err = tx.Model(&MetadataBitcoinExchange{
 			BitcoinBlockHash:  txMeta.BitcoinBlockHash,
 			BitcoinMerkleRoot: txMeta.BitcoinMerkleRoot,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypePrivateMessage {
 		txMeta := txn.TxnMeta.(*PrivateMessageMetadata)
 		_, err = tx.Model(&MetadataPrivateMessage{
 			RecipientPublicKey: txMeta.RecipientPublicKey,
 			EncryptedText:      txMeta.EncryptedText,
 			TimestampNanos:     txMeta.TimestampNanos,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeSubmitPost {
 		txMeta := txn.TxnMeta.(*SubmitPostMetadata)
 		_, err = tx.Model(&MetadataSubmitPost{
@@ -271,7 +272,7 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 			Body:                     txMeta.Body,
 			TimestampNanos:           txMeta.TimestampNanos,
 			IsHidden:                 txMeta.IsHidden,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeUpdateProfile {
 		txMeta := txn.TxnMeta.(*UpdateProfileMetadata)
 		_, err = tx.Model(&MetadataUpdateProfile{
@@ -279,25 +280,24 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 			NewUsername:                 txMeta.NewUsername,
 			NewProfilePic:               txMeta.NewProfilePic,
 			NewCreatorBasisPoints:       txMeta.NewCreatorBasisPoints,
-			IsHidden:                    txMeta.IsHidden,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeUpdateBitcoinUSDExchangeRate {
 		txMeta := txn.TxnMeta.(*UpdateBitcoinUSDExchangeRateMetadataa)
 		_, err = tx.Model(&MetadataUpdateBitcoinUSDExchangeRate{
 			USDCentsPerBitcoin: txMeta.USDCentsPerBitcoin,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeFollow {
 		txMeta := txn.TxnMeta.(*FollowMetadata)
 		_, err = tx.Model(&MetadataFollow{
 			FollowedPublicKey: txMeta.FollowedPublicKey,
 			IsUnfollow: txMeta.IsUnfollow,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeLike {
 		txMeta := txn.TxnMeta.(*LikeMetadata)
 		_, err = tx.Model(&MetadataLike{
 			LikedPostHash: txMeta.LikedPostHash,
 			IsUnlike: txMeta.IsUnlike,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeCreatorCoin {
 		txMeta := txn.TxnMeta.(*CreatorCoinMetadataa)
 		_, err = tx.Model(&MetadataCreatorCoin{
@@ -308,20 +308,20 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 			BitCloutToAddNanos: txMeta.BitCloutToAddNanos,
 			MinBitCloutExpectedNanos: txMeta.MinBitCloutExpectedNanos,
 			MinCreatorCoinExpectedNanos: txMeta.MinCreatorCoinExpectedNanos,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeCreatorCoinTransfer {
 		txMeta := txn.TxnMeta.(*CreatorCoinTransferMetadataa)
 		_, err = tx.Model(&MetadataCreatorCoinTransfer{
 			ProfilePublicKey: txMeta.ProfilePublicKey,
 			CreatorCoinToTransferNanos: txMeta.CreatorCoinToTransferNanos,
 			ReceiverPublicKey: txMeta.ReceiverPublicKey,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else if txn.TxnMeta.GetTxnType() == TxnTypeSwapIdentity {
 		txMeta := txn.TxnMeta.(*SwapIdentityMetadataa)
 		_, err = tx.Model(&MetadataSwapIdentity{
 			FromPublicKey: txMeta.FromPublicKey,
 			ToPublicKey: txMeta.ToPublicKey,
-		}).Insert()
+		}).Returning("NULL").Insert()
 	} else {
 		err = fmt.Errorf("InsertTransactionTx: Unimplemented txn type %v", txn.TxnMeta.GetTxnType().String())
 	}
@@ -351,4 +351,26 @@ func UpsertBlockAndTransactions(db *pg.DB, blockNode *BlockNode, bitcloutBlock *
 
 		return nil
 	})
+}
+
+func PgGetUtxoEntryForUtxoKey(db *pg.DB, utxoKey *UtxoKey) *UtxoEntry {
+	utxo := &TransactionOutput{
+		OutputHash: &utxoKey.TxID,
+		OutputIndex: utxoKey.Index,
+		Spent: false,
+	}
+
+	err := db.Model(utxo).WherePK().Select()
+	if err != nil {
+		return nil
+	}
+
+	return &UtxoEntry {
+		PublicKey: utxo.PublicKey,
+		AmountNanos: utxo.AmountNanos,
+		// TODO: Block height?
+		UtxoType: utxo.OutputType,
+		isSpent: utxo.Spent,
+		UtxoKey: utxoKey,
+	}
 }

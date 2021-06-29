@@ -124,7 +124,7 @@ func TestBasicTransfer(t *testing.T) {
 		txn.PublicKey = recipientPkBytes
 
 		_signTxn(t, txn, recipientPrivString)
-		utxoView, _ := NewUtxoView(db, params, nil)
+		utxoView, _ := NewUtxoView(db, params, nil, nil)
 		txHash := txn.Hash()
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err =
@@ -158,7 +158,7 @@ func TestBasicTransfer(t *testing.T) {
 		// Sign the transaction with the recipient's key rather than the
 		// sender's key.
 		_signTxn(t, txn, recipientPrivString)
-		utxoView, _ := NewUtxoView(db, params, nil)
+		utxoView, _ := NewUtxoView(db, params, nil, nil)
 		txHash := txn.Hash()
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err =
@@ -185,7 +185,7 @@ func TestBasicTransfer(t *testing.T) {
 			},
 		}
 		_signTxn(t, txn, senderPrivString)
-		utxoView, _ := NewUtxoView(db, params, nil)
+		utxoView, _ := NewUtxoView(db, params, nil, nil)
 		txHash := txn.Hash()
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err =
@@ -220,7 +220,7 @@ func TestBasicTransfer(t *testing.T) {
 		require.Greater(totalInput, uint64(0))
 
 		_signTxn(t, txn, senderPrivString)
-		utxoView, _ := NewUtxoView(db, params, nil)
+		utxoView, _ := NewUtxoView(db, params, nil, nil)
 		txHash := txn.Hash()
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err =
@@ -244,7 +244,7 @@ func TestBasicTransfer(t *testing.T) {
 
 		txHashes, err := ComputeTransactionHashes(blockToMine.Txns)
 		require.NoError(err)
-		utxoView, _ := NewUtxoView(db, params, nil)
+		utxoView, _ := NewUtxoView(db, params, nil, nil)
 		_, err = utxoView.ConnectBlock(blockToMine, txHashes, true /*verifySignatures*/)
 		require.Error(err)
 		require.Contains(err.Error(), RuleErrorBlockRewardExceedsMaxAllowed)
@@ -260,7 +260,7 @@ func TestBasicTransfer(t *testing.T) {
 
 		txHashes, err := ComputeTransactionHashes(blockToMine.Txns)
 		require.NoError(err)
-		utxoView, _ := NewUtxoView(db, params, nil)
+		utxoView, _ := NewUtxoView(db, params, nil, nil)
 		_, err = utxoView.ConnectBlock(blockToMine, txHashes, true /*verifySignatures*/)
 		require.NoError(err)
 	}
@@ -278,7 +278,7 @@ func _doBasicTransferWithViewFlush(t *testing.T, chain *Blockchain, db *badger.D
 	txn := _assembleBasicTransferTxnFullySigned(
 		t, chain, amountNanos, feeRateNanosPerKB, pkSenderStr, pkReceiverStr, privStr, nil)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	// Always use height+1 for validation since it's assumed the transaction will
@@ -331,7 +331,7 @@ func _updateUSDCentsPerBitcoinExchangeRate(t *testing.T, chain *Blockchain, db *
 	// Sign the transaction now that its inputs are set up.
 	_signTxn(t, txn, updaterPrivBase58Check)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txHash := txn.Hash()
@@ -391,7 +391,7 @@ func _updateGlobalParamsEntry(t *testing.T, chain *Blockchain, db *badger.DB,
 	// Sign the transaction now that its inputs are set up.
 	_signTxn(t, txn, updaterPrivBase58Check)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txHash := txn.Hash()
@@ -440,7 +440,7 @@ func _submitPost(t *testing.T, chain *Blockchain, db *badger.DB,
 	updaterPkBytes, _, err := Base58CheckDecode(updaterPkBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	body, err := json.Marshal(bodyObj)
@@ -512,7 +512,7 @@ func _swapIdentity(t *testing.T, chain *Blockchain, db *badger.DB,
 	updaterPkBytes, _, err := Base58CheckDecode(updaterPkBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, changeAmountMake, feesMake, err := chain.CreateSwapIdentityTxn(
@@ -572,7 +572,7 @@ func _updateProfile(t *testing.T, chain *Blockchain, db *badger.DB,
 	updaterPkBytes, _, err := Base58CheckDecode(updaterPkBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, changeAmountMake, feesMake, err := chain.CreateUpdateProfileTxn(
@@ -648,7 +648,7 @@ func _creatorCoinTxn(t *testing.T, chain *Blockchain, db *badger.DB,
 	profilePkBytes, _, err := Base58CheckDecode(ProfilePublicKeyBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, changeAmountMake, feesMake, err := chain.CreateCreatorCoinTxn(
@@ -722,7 +722,7 @@ func _doCreatorCoinTransferTxnWithDiamonds(t *testing.T, chain *Blockchain, db *
 	receiverPkBytes, _, err := Base58CheckDecode(ReceiverPublicKeyBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -788,7 +788,7 @@ func _doCreatorCoinTransferTxn(t *testing.T, chain *Blockchain, db *badger.DB,
 	receiverPkBytes, _, err := Base58CheckDecode(ReceiverPublicKeyBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, _, _, err := chain.CreateCreatorCoinTransferTxn(
@@ -850,7 +850,7 @@ func _doSubmitPostTxn(t *testing.T, chain *Blockchain, db *badger.DB,
 	updaterPkBytes, _, err := Base58CheckDecode(UpdaterPublicKeyBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, _, _, err := chain.CreateSubmitPostTxn(
@@ -916,7 +916,7 @@ func _privateMessage(t *testing.T, chain *Blockchain, db *badger.DB,
 	recipientPkBytes, _, err := Base58CheckDecode(recipientPkBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, changeAmountMake, feesMake, err := chain.CreatePrivateMessageTxn(
@@ -971,7 +971,7 @@ func _doLikeTxn(t *testing.T, chain *Blockchain, db *badger.DB,
 	senderPkBytes, _, err := Base58CheckDecode(senderPkBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, changeAmountMake, feesMake, err := chain.CreateLikeTxn(
@@ -1029,7 +1029,7 @@ func _doFollowTxn(t *testing.T, chain *Blockchain, db *badger.DB,
 	followedPkBytes, _, err := Base58CheckDecode(followedPkBase58Check)
 	require.NoError(err)
 
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 
 	txn, totalInputMake, changeAmountMake, feesMake, err := chain.CreateFollowTxn(
@@ -1127,7 +1127,7 @@ func TestSubmitPost(t *testing.T) {
 	registerOrTransfer("", senderPkString, m3Pub, senderPrivString)
 
 	checkPostsDeleted := func() {
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		corePosts, commentsByPostHash, err := utxoView.GetAllPosts()
 		require.NoError(err)
@@ -2043,7 +2043,7 @@ func TestSubmitPost(t *testing.T) {
 	}
 
 	checkPostsExist := func() {
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		corePosts, commentsByPostHash, err := utxoView.GetAllPosts()
 		require.NoError(err)
@@ -2289,7 +2289,7 @@ func TestSubmitPost(t *testing.T) {
 		currentTxn := txns[backwardIter]
 		fmt.Printf("Disconnecting transaction with type %v index %d (going backwards)\n", currentTxn.TxnMeta.GetTxnType(), backwardIter)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		currentHash := currentTxn.Hash()
@@ -2319,7 +2319,7 @@ func TestSubmitPost(t *testing.T) {
 	}
 
 	// Apply all the transactions to a view and flush the view to the db.
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii, txn := range txns {
 		fmt.Printf("Adding txn %v of type %v to UtxoView\n", ii, txn.TxnMeta.GetTxnType())
@@ -2368,7 +2368,7 @@ func TestSubmitPost(t *testing.T) {
 
 	// Disonnect the transactions from a single view in the same way as above
 	// i.e. without flushing each time.
-	utxoView2, err := NewUtxoView(db, params, nil)
+	utxoView2, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii := 0; ii < len(txnOps); ii++ {
 		backwardIter := len(txnOps) - 1 - ii
@@ -2423,7 +2423,7 @@ func TestSubmitPost(t *testing.T) {
 
 	// Roll back the block and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		// Fetch the utxo operations for the block we're detaching. We need these
@@ -3103,7 +3103,7 @@ func TestUpdateProfile(t *testing.T) {
 	// user2
 	// m2Pub, m2, i am m2, 10*100, 1.25*100*100
 	checkProfilesExist := func() {
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		profileEntriesByPublicKey, _, _, _, err := utxoView.GetAllProfiles(nil)
 		require.NoError(err)
@@ -3153,7 +3153,7 @@ func TestUpdateProfile(t *testing.T) {
 	checkProfilesExist()
 
 	checkProfilesDeleted := func() {
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		profileEntriesByPublicKey, _, _, _, err := utxoView.GetAllProfiles(nil)
 		require.NoError(err)
@@ -3197,7 +3197,7 @@ func TestUpdateProfile(t *testing.T) {
 		currentTxn := txns[backwardIter]
 		fmt.Printf("Disconnecting transaction with type %v index %d (going backwards)\n", currentTxn.TxnMeta.GetTxnType(), backwardIter)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		currentHash := currentTxn.Hash()
@@ -3228,7 +3228,7 @@ func TestUpdateProfile(t *testing.T) {
 	}
 
 	// Apply all the transactions to a view and flush the view to the db.
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii, txn := range txns {
 		fmt.Printf("Adding txn %v of type %v to UtxoView\n", ii, txn.TxnMeta.GetTxnType())
@@ -3249,7 +3249,7 @@ func TestUpdateProfile(t *testing.T) {
 
 	// Disonnect the transactions from a single view in the same way as above
 	// i.e. without flushing each time.
-	utxoView2, err := NewUtxoView(db, params, nil)
+	utxoView2, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii := 0; ii < len(txnOps); ii++ {
 		backwardIter := len(txnOps) - 1 - ii
@@ -3276,7 +3276,7 @@ func TestUpdateProfile(t *testing.T) {
 
 	// Roll back the block and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		// Fetch the utxo operations for the block we're detaching. We need these
@@ -3533,7 +3533,7 @@ func TestPrivateMessage(t *testing.T) {
 		currentTxn := txns[backwardIter]
 		fmt.Printf("Disconnecting transaction with type %v index %d (going backwards)\n", currentTxn.TxnMeta.GetTxnType(), backwardIter)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		currentHash := currentTxn.Hash()
@@ -3585,7 +3585,7 @@ func TestPrivateMessage(t *testing.T) {
 	}
 
 	// Apply all the transactions to a view and flush the view to the db.
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii, txn := range txns {
 		fmt.Printf("Adding txn %v of type %v to UtxoView\n", ii, txn.TxnMeta.GetTxnType())
@@ -3603,7 +3603,7 @@ func TestPrivateMessage(t *testing.T) {
 
 	// Disonnect the transactions from a single view in the same way as above
 	// i.e. without flushing each time.
-	utxoView2, err := NewUtxoView(db, params, nil)
+	utxoView2, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii := 0; ii < len(txnOps); ii++ {
 		backwardIter := len(txnOps) - 1 - ii
@@ -3676,7 +3676,7 @@ func TestPrivateMessage(t *testing.T) {
 
 	// Roll back the block and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		// Fetch the utxo operations for the block we're detaching. We need these
@@ -4127,7 +4127,7 @@ func TestLikeTxns(t *testing.T) {
 			"Disconnecting transaction with type %v index %d (going backwards)\n",
 			currentTxn.TxnMeta.GetTxnType(), backwardIter)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		currentHash := currentTxn.Hash()
@@ -4212,7 +4212,7 @@ func TestLikeTxns(t *testing.T) {
 	}
 
 	// Apply all the transactions to a view and flush the view to the db.
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii, txn := range txns {
 		fmt.Printf("Adding txn %v of type %v to UtxoView\n", ii, txn.TxnMeta.GetTxnType())
@@ -4332,7 +4332,7 @@ func TestLikeTxns(t *testing.T) {
 
 	// Disconnect the transactions from a single view in the same way as above
 	// i.e. without flushing each time.
-	utxoView2, err := NewUtxoView(db, params, nil)
+	utxoView2, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii := 0; ii < len(txnOps); ii++ {
 		backwardIter := len(txnOps) - 1 - ii
@@ -4375,7 +4375,7 @@ func TestLikeTxns(t *testing.T) {
 
 	// Roll back the block and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		// Fetch the utxo operations for the block we're detaching. We need these
@@ -4888,7 +4888,7 @@ func TestFollowTxns(t *testing.T) {
 		currentTxn := txns[backwardIter]
 		fmt.Printf("Disconnecting transaction with type %v index %d (going backwards)\n", currentTxn.TxnMeta.GetTxnType(), backwardIter)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		currentHash := currentTxn.Hash()
@@ -4966,7 +4966,7 @@ func TestFollowTxns(t *testing.T) {
 	}
 
 	// Apply all the transactions to a view and flush the view to the db.
-	utxoView, err := NewUtxoView(db, params, nil)
+	utxoView, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii, txn := range txns {
 		fmt.Printf("Adding txn %v of type %v to UtxoView\n", ii, txn.TxnMeta.GetTxnType())
@@ -4985,7 +4985,7 @@ func TestFollowTxns(t *testing.T) {
 
 	// Disconnect the transactions from a single view in the same way as above
 	// i.e. without flushing each time.
-	utxoView2, err := NewUtxoView(db, params, nil)
+	utxoView2, err := NewUtxoView(db, params, nil, nil)
 	require.NoError(err)
 	for ii := 0; ii < len(txnOps); ii++ {
 		backwardIter := len(txnOps) - 1 - ii
@@ -5028,7 +5028,7 @@ func TestFollowTxns(t *testing.T) {
 
 	// Roll back the block and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		// Fetch the utxo operations for the block we're detaching. We need these
@@ -5471,7 +5471,7 @@ func TestBitcoinExchange(t *testing.T) {
 	txHash1 := burnTxn1.Hash()
 	burnTxn2 := bitcoinExchangeTxns[1]
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -5543,7 +5543,7 @@ func TestBitcoinExchange(t *testing.T) {
 	// enough work built on it yet. Note that it is not a RuleError because we don't
 	// want to mark the block this transaction appears in as invalid when this happens.
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(
@@ -5628,7 +5628,7 @@ func TestBitcoinExchange(t *testing.T) {
 	// Verify that adding the transaction to the UtxoView fails because there is
 	// not enough work on the burn block yet.
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -5654,7 +5654,7 @@ func TestBitcoinExchange(t *testing.T) {
 
 	// Should still fail since min burn work is 2
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -5675,7 +5675,7 @@ func TestBitcoinExchange(t *testing.T) {
 
 	// The transaction should pass now
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -5720,7 +5720,7 @@ func TestBitcoinExchange(t *testing.T) {
 	// in the middle.
 	utxoOpsList := [][]*UtxoOperation{}
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		// Add a placeholder where the rate update is going to be
@@ -5870,7 +5870,7 @@ func TestBitcoinExchange(t *testing.T) {
 
 	{
 		// Rolling back all the transactions should work.
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 		for ii := range bitcoinExchangeTxns {
 			index := len(bitcoinExchangeTxns) - 1 - ii
@@ -5906,7 +5906,7 @@ func TestBitcoinExchange(t *testing.T) {
 	// flushing should be fine.
 	utxoOpsList = [][]*UtxoOperation{}
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 		for ii, burnTxn := range bitcoinExchangeTxns {
 			blockHeight := chain.blockTip().Height + 1
@@ -6124,7 +6124,7 @@ func TestBitcoinExchange(t *testing.T) {
 
 	// Roll back the blocks and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		{
@@ -6369,7 +6369,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 	txHash1 := burnTxn1.Hash()
 	burnTxn2 := bitcoinExchangeTxns[1]
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -6441,7 +6441,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 	// enough work built on it yet. Note that it is not a RuleError because we don't
 	// want to mark the block this transaction appears in as invalid when this happens.
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(
@@ -6526,7 +6526,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 	// Verify that adding the transaction to the UtxoView fails because there is
 	// not enough work on the burn block yet.
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -6552,7 +6552,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 
 	// Should still fail since min burn work is 2
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -6573,7 +6573,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 
 	// The transaction should pass now
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -6618,7 +6618,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 	// in the middle.
 	utxoOpsList := [][]*UtxoOperation{}
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		// Add a placeholder where the rate update is going to be
@@ -6766,7 +6766,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 
 	{
 		// Rolling back all the transactions should work.
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 		for ii := range bitcoinExchangeTxns {
 			index := len(bitcoinExchangeTxns) - 1 - ii
@@ -6802,7 +6802,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 	// flushing should be fine.
 	utxoOpsList = [][]*UtxoOperation{}
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 		for ii, burnTxn := range bitcoinExchangeTxns {
 			blockHeight := chain.blockTip().Height + 1
@@ -7020,7 +7020,7 @@ func TestBitcoinExchangeGlobalParams(t *testing.T) {
 
 	// Roll back the blocks and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		{
@@ -7271,7 +7271,7 @@ func TestSpendOffOfUnminedTxnsBitcoinExchange(t *testing.T) {
 	// Verify that adding the transaction to the UtxoView fails because there is
 	// not enough work on the burn block yet.
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -7531,7 +7531,7 @@ func TestSpendOffOfUnminedTxnsBitcoinExchange(t *testing.T) {
 
 	// Should still fail since min burn work is 2
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -7560,7 +7560,7 @@ func TestSpendOffOfUnminedTxnsBitcoinExchange(t *testing.T) {
 
 	// The transaction should pass now
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 
 		_, _, _, _, err :=
@@ -7730,7 +7730,7 @@ func TestSpendOffOfUnminedTxnsBitcoinExchange(t *testing.T) {
 	// the mempool's disconnect function to make sure we get the txns
 	// back during a reorg.
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		{
@@ -8011,7 +8011,7 @@ func TestBitcoinExchangeWithAmountNanosNonZeroAtGenesis(t *testing.T) {
 	// Verify that adding the transaction to the UtxoView fails because the header
 	// hash is not present yet.
 	{
-		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, _ := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		blockHeight := chain.blockTip().Height + 1
 		_, _, _, _, err :=
 			utxoView.ConnectTransaction(burnTxn1, txHash1, burnTxn1Size, blockHeight, true /*verifySignature*/, false /*ignoreUtxos*/)
@@ -8204,7 +8204,7 @@ func TestBitcoinExchangeWithAmountNanosNonZeroAtGenesis(t *testing.T) {
 	// in the middle.
 	utxoOpsList := [][]*UtxoOperation{}
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		// Add a placeholder where the rate update is going to be
@@ -8352,7 +8352,7 @@ func TestBitcoinExchangeWithAmountNanosNonZeroAtGenesis(t *testing.T) {
 
 	{
 		// Rolling back all the transactions should work.
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 		for ii := range bitcoinExchangeTxns {
 			index := len(bitcoinExchangeTxns) - 1 - ii
@@ -8388,7 +8388,7 @@ func TestBitcoinExchangeWithAmountNanosNonZeroAtGenesis(t *testing.T) {
 	// flushing should be fine.
 	utxoOpsList = [][]*UtxoOperation{}
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 		for ii, burnTxn := range bitcoinExchangeTxns {
 			blockHeight := chain.blockTip().Height + 1
@@ -8576,7 +8576,7 @@ func TestBitcoinExchangeWithAmountNanosNonZeroAtGenesis(t *testing.T) {
 
 	// Roll back the blocks and make sure we don't hit any errors.
 	{
-		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager)
+		utxoView, err := NewUtxoView(db, paramsCopy, bitcoinManager, nil)
 		require.NoError(err)
 
 		{
@@ -8700,7 +8700,7 @@ func TestUpdateExchangeRate(t *testing.T) {
 			newUSDCentsPerBitcoin)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		txnSize := getTxnSize(*updateExchangeRateTxn)
 		blockHeight := chain.blockTip().Height + 1
@@ -8770,7 +8770,7 @@ func TestUpdateGlobalParams(t *testing.T) {
 			false)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		txnSize := getTxnSize(*updateGlobalParamsTxn)
 		blockHeight := chain.blockTip().Height + 1
@@ -8810,7 +8810,7 @@ func TestUpdateGlobalParams(t *testing.T) {
 			false)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		txnSize := getTxnSize(*updateGlobalParamsTxn)
 		blockHeight := chain.blockTip().Height + 1
@@ -9041,7 +9041,7 @@ func _helpTestCreatorCoinBuySell(
 		// If no UtxoView is passed, use a new one to run our checks.
 		if utxoView == nil {
 			var err error
-			utxoView, err = NewUtxoView(db, params, nil)
+			utxoView, err = NewUtxoView(db, params, nil, nil)
 			require.NoError(err)
 		}
 
@@ -9388,7 +9388,7 @@ func _helpTestCreatorCoinBuySell(
 		_checkTestData(testData, fmt.Sprintf("SimpleDisconnect: Index: %v", testIndex), nil, nil)
 
 		// Disconnect the transaction
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		blockHeight := chain.blockTip().Height + 1
 		fmt.Printf("Disconnecting test index: %v\n", testIndex)
@@ -9417,7 +9417,7 @@ func _helpTestCreatorCoinBuySell(
 	// Connect all the txns to a single UtxoView without flushing
 	{
 		// Create a new UtxoView to check on the state of things
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		for testIndex, testData := range creatorCoinTests {
 			fmt.Printf("Applying test index: %v\n", testIndex)
@@ -9443,7 +9443,7 @@ func _helpTestCreatorCoinBuySell(
 	// Disconnect all the txns on a single view and flush at the end
 	{
 		// Create a new UtxoView to check on the state of things
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 		blockHeight := chain.blockTip().Height + 1
 		for iterIndex := range creatorCoinTests {
@@ -9595,7 +9595,7 @@ func _helpTestCreatorCoinBuySell(
 		require.NoError(utxoView.DisconnectBlock(blockToDisconnect, txHashes, utxoOps))
 	}
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		disconnectSingleBlock(finalBlock2, utxoView)
@@ -9897,7 +9897,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -9931,7 +9931,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -9964,7 +9964,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -9997,7 +9997,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -10030,7 +10030,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -10063,7 +10063,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -10097,7 +10097,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 		receiverPkBytes, _, err := Base58CheckDecode(m1Pub)
 		require.NoError(err)
 
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		txn, _, _, _, err := chain.CreateCreatorCoinTransferTxnWithDiamonds(
@@ -10124,7 +10124,7 @@ func TestCreatorCoinWithDiamondsFailureCases(t *testing.T) {
 	}
 	// You can't apply the same number of Diamonds to a post twice
 	{
-		utxoView, err := NewUtxoView(db, params, nil)
+		utxoView, err := NewUtxoView(db, params, nil, nil)
 		require.NoError(err)
 
 		// Let's have a successful transaction

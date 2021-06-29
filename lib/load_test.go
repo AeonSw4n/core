@@ -126,7 +126,7 @@ func TestComputeMaxTPS(t *testing.T) {
 		require.NoError(err)
 		pprof.StartCPUProfile(ff)
 
-		utxoView, err := NewUtxoView(db, params, nil /*bitcoinManager*/)
+		utxoView, err := NewUtxoView(db, params, nil /*bitcoinManager*/, nil)
 		require.NoError(err)
 
 		timeStart := time.Now()

@@ -2463,7 +2463,7 @@ func InitDbWithBitCloutGenesisBlock(params *BitCloutParams, handle *badger.DB) e
 	// think things are initialized because we set the best block hash at the
 	// top. We should fix this at some point so that an error in this step
 	// wipes out the best hash.
-	utxoView, err := NewUtxoView(handle, params, nil)
+	utxoView, err := NewUtxoView(handle, params, nil, nil)
 	if err != nil {
 		return fmt.Errorf(
 			"InitDbWithBitCloutGenesisBlock: Error initializing UtxoView")
