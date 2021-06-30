@@ -362,7 +362,13 @@ func (bc *Blockchain) _initChain() error {
 	// If there is no best chain hash in the db then it means we've never
 	// initialized anything so take the time to do it now.
 	if bestBlockHash == nil || bestHeaderHash == nil {
-		err := InitDbWithBitCloutGenesisBlock(bc.params, bc.db)
+		var err error
+
+		if bc.postgres != nil {
+			err = PgInitGenesisBlock(bc.postgres, bc.params)
+		} else {
+			err = InitDbWithBitCloutGenesisBlock(bc.params, bc.db)
+		}
 		if err != nil {
 			return errors.Wrapf(err, "_initChain: Problem initializing db with genesis block")
 		}

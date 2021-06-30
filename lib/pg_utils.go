@@ -1,8 +1,8 @@
 package lib
 
 import (
+	"encoding/hex"
 	"fmt"
-
 	"github.com/go-pg/pg/v10"
 )
 
@@ -373,4 +373,123 @@ func PgGetUtxoEntryForUtxoKey(db *pg.DB, utxoKey *UtxoKey) *UtxoEntry {
 		isSpent: utxo.Spent,
 		UtxoKey: utxoKey,
 	}
+}
+
+func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
+	// Construct a node for the genesis block. Its height is zero and it has
+	// no parents. Its difficulty should be set to the initial
+	// difficulty specified in the parameters and it should be assumed to be
+	// valid and stored by the end of this function.
+	//genesisBlock := params.GenesisBlock
+	//diffTarget := NewBlockHash(params.MinDifficultyTargetHex)
+	//blockHash := NewBlockHash(params.GenesisBlockHashHex)
+	//genesisNode := NewBlockNode(
+	//	nil, // Parent
+	//	blockHash,
+	//	0, // Height
+	//	diffTarget,
+	//	BytesToBigint(ExpectedWorkForBlockHash(diffTarget)[:]), // CumWork
+	//	genesisBlock.Header, // Header
+	//	StatusHeaderValidated|StatusBlockProcessed|StatusBlockStored|StatusBlockValidated, // Status
+	//)
+
+	// Set the fields in the db to reflect the current state of our chain.
+	//
+	// Set the best hash to the genesis block in the db since its the only node
+	// we're currently aware of. Set it for both the header chain and the block
+	// chain.
+	//if err := PutBestHash(blockHash, handle, ChainTypeBitCloutBlock); err != nil {
+	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting genesis block hash into db for block chain")
+	//}
+	//// Add the genesis block to the (hash -> block) index.
+	//if err := PutBlock(genesisBlock, handle); err != nil {
+	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting genesis block into db")
+	//}
+	//// Add the genesis block to the (height, hash -> node info) index in the db.
+	//if err := PutHeightHashToNodeInfo(genesisNode, handle, false /*bitcoinNodes*/); err != nil {
+	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting (height, hash -> node) in db")
+	//}
+	//if err := DbPutNanosPurchased(handle, params.BitCloutNanosPurchasedAtGenesis); err != nil {
+	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting genesis block hash into db for block chain")
+	//}
+	//if err := DbPutGlobalParamsEntry(handle, InitialGlobalParamsEntry); err != nil {
+	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting GlobalParamsEntry into db for block chain")
+	//}
+
+	// We apply seed transactions here. This step is useful for setting
+	// up the blockchain with a particular set of transactions, e.g. when
+	// hard forking the chain.
+	//
+	// TODO: Right now there's an issue where if we hit an errur during this
+	// step of the initialization, the next time we run the program it will
+	// think things are initialized because we set the best block hash at the
+	// top. We should fix this at some point so that an error in this step
+	// wipes out the best hash.
+	utxoView, err := NewUtxoView(nil, params, nil, db)
+	if err != nil {
+		return fmt.Errorf("InitDbWithBitCloutGenesisBlock: Error initializing UtxoView")
+	}
+
+	// Add the seed balances to the view.
+	for index, txOutput := range params.SeedBalances {
+		outputKey := UtxoKey{
+			TxID:  BlockHash{},
+			Index: uint32(index),
+		}
+		utxoEntry := UtxoEntry{
+			AmountNanos: txOutput.AmountNanos,
+			PublicKey:   txOutput.PublicKey,
+			BlockHeight: 0,
+			// Just make this a normal transaction so that we don't have to wait for
+			// the block reward maturity.
+			UtxoType: UtxoTypeOutput,
+			UtxoKey:  &outputKey,
+		}
+
+		_, err := utxoView._addUtxo(&utxoEntry)
+		if err != nil {
+			return fmt.Errorf("InitDbWithBitCloutGenesisBlock: Error adding "+
+				"seed balance at index %v ; output: %v: %v", index, txOutput, err)
+		}
+	}
+
+	// Add the seed txns to the view
+	for txnIndex, txnHex := range params.SeedTxns {
+		txnBytes, err := hex.DecodeString(txnHex)
+		if err != nil {
+			return fmt.Errorf(
+				"InitDbWithBitCloutGenesisBlock: Error decoding seed "+
+					"txn HEX: %v, txn index: %v, txn hex: %v",
+				err, txnIndex, txnHex)
+		}
+		txn := &MsgBitCloutTxn{}
+		if err := txn.FromBytes(txnBytes); err != nil {
+			return fmt.Errorf(
+				"InitDbWithBitCloutGenesisBlock: Error decoding seed "+
+					"txn BYTES: %v, txn index: %v, txn hex: %v",
+				err, txnIndex, txnHex)
+		}
+
+		// Important: ignoreUtxos makes it so that the inputs/outputs aren't
+		// processed, which is important.
+		// Set txnSizeBytes to 0 here as the minimum network fee is 0 at genesis block, so there is no need to serialize
+		// these transactions to check if they meet the minimum network fee requirement.
+		_, _, _, _, err = utxoView.ConnectTransaction(
+			txn, txn.Hash(), 0, 0 /*blockHeight*/, false /*verifySignatures*/, true /*ignoreUtxos*/)
+		if err != nil {
+			return fmt.Errorf(
+				"InitDbWithBitCloutGenesisBlock: Error connecting transaction: %v, "+
+					"txn index: %v, txn hex: %v",
+				err, txnIndex, txnHex)
+		}
+	}
+
+	// Flush all the data in the view.
+	err = utxoView.FlushToDb()
+	if err != nil {
+		return fmt.Errorf(
+			"InitDbWithBitCloutGenesisBlock: Error flushing seed txns to DB: %v", err)
+	}
+
+	return nil
 }
