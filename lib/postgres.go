@@ -4,7 +4,27 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/go-pg/pg/v10"
+	"github.com/golang/glog"
 )
+
+type Postgres struct {
+	db *pg.DB
+}
+
+func NewPostgres(postgesURI string) (*Postgres, error) {
+	options, err := pg.ParseURL(postgesURI)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Postgres{
+		db: pg.Connect(options),
+	}, nil
+}
+
+//
+// Tables
+//
 
 type Chain struct {
 	ID      uint64
@@ -53,7 +73,7 @@ type TransactionInput struct {
 	InputIndex uint32 `pg:",use_zero"`
 }
 
-// TransactionOutput represents BitCloutOutput
+// TransactionOutput represents BitCloutOutput and UtxoEntry
 type TransactionOutput struct {
 	OutputHash  *BlockHash `pg:",pk"`
 	OutputIndex uint32     `pg:",pk,use_zero"`
@@ -153,14 +173,14 @@ type MetadataSwapIdentity struct {
 	ToPublicKey   []byte
 }
 
-func UpsertBlock(db *pg.DB, blockNode *BlockNode) error {
-	return db.RunInTransaction(db.Context(), func(tx *pg.Tx) error {
-		_, err := UpsertBlockTx(tx, blockNode)
+func (postgres *Postgres) UpsertBlock(blockNode *BlockNode) error {
+	return postgres.db.RunInTransaction(postgres.db.Context(), func(tx *pg.Tx) error {
+		_, err := postgres.UpsertBlockTx(tx, blockNode)
 		return err
 	})
 }
 
-func UpsertBlockTx(tx *pg.Tx, blockNode *BlockNode) (*Block, error) {
+func (postgres *Postgres) UpsertBlockTx(tx *pg.Tx, blockNode *BlockNode) (*Block, error) {
 	block := &Block{
 		Hash:       blockNode.Hash,
 		ParentHash: blockNode.Parent.Hash,
@@ -187,7 +207,11 @@ func UpsertBlockTx(tx *pg.Tx, blockNode *BlockNode) (*Block, error) {
 	return block, nil
 }
 
-func UpsertChainTx(tx *pg.Tx, name string, tipHash string) error {
+func (postgres *Postgres) GetBlockIndex() (map[BlockHash]*BlockNode, error) {
+	return nil, nil
+}
+
+func (postgres *Postgres) UpsertChainTx(tx *pg.Tx, name string, tipHash string) error {
 	bestChain := &Chain{
 		TipHash: tipHash,
 		Name:    name,
@@ -199,7 +223,7 @@ func UpsertChainTx(tx *pg.Tx, name string, tipHash string) error {
 	return err
 }
 
-func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) error {
+func (postgres *Postgres) InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) error {
 	txnHash := txn.Hash()
 	transaction := &Transaction{
 		Hash:      txnHash,
@@ -329,8 +353,8 @@ func InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, blockHash *BlockHash) e
 	return err
 }
 
-func UpsertBlockAndTransactions(db *pg.DB, blockNode *BlockNode, bitcloutBlock *MsgBitCloutBlock) error {
-	return db.RunInTransaction(db.Context(), func(tx *pg.Tx) error {
+func (postgres *Postgres) UpsertBlockAndTransactions(blockNode *BlockNode, bitcloutBlock *MsgBitCloutBlock) error {
+	return postgres.db.RunInTransaction(postgres.db.Context(), func(tx *pg.Tx) error {
 		//block, err := UpsertBlockTx(tx, blockNode)
 		//if err != nil {
 		//	return err
@@ -343,7 +367,7 @@ func UpsertBlockAndTransactions(db *pg.DB, blockNode *BlockNode, bitcloutBlock *
 		//}
 
 		for _, txn := range bitcloutBlock.Txns {
-			err := InsertTransactionTx(tx, txn, blockHash)
+			err := postgres.InsertTransactionTx(tx, txn, blockHash)
 			if err != nil {
 				return err
 			}
@@ -353,14 +377,14 @@ func UpsertBlockAndTransactions(db *pg.DB, blockNode *BlockNode, bitcloutBlock *
 	})
 }
 
-func PgGetUtxoEntryForUtxoKey(db *pg.DB, utxoKey *UtxoKey) *UtxoEntry {
+func (postgres *Postgres) GetUtxoEntryForUtxoKey(utxoKey *UtxoKey) *UtxoEntry {
 	utxo := &TransactionOutput{
 		OutputHash: &utxoKey.TxID,
 		OutputIndex: utxoKey.Index,
 		Spent: false,
 	}
 
-	err := db.Model(utxo).WherePK().Select()
+	err := postgres.db.Model(utxo).WherePK().Select()
 	if err != nil {
 		return nil
 	}
@@ -375,46 +399,78 @@ func PgGetUtxoEntryForUtxoKey(db *pg.DB, utxoKey *UtxoKey) *UtxoEntry {
 	}
 }
 
-func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
+//
+// BlockView Flushing
+//
+
+func (postgres *Postgres) FlushView(view *UtxoView) error {
+	return postgres.db.RunInTransaction(postgres.db.Context(), func(tx *pg.Tx) error {
+		if err := postgres.flushUtxos(tx, view); err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (postgres *Postgres) flushUtxos(tx *pg.Tx, view *UtxoView) error {
+	glog.Infof("flushUtxos: flushing %d mappings", len(view.UtxoKeyToUtxoEntry))
+
+	var outputs []TransactionOutput
+	for utxoKeyIter, utxoEntry := range view.UtxoKeyToUtxoEntry {
+		// Make a copy of the iterator since it might change from under us.
+		utxoKey := utxoKeyIter
+		outputs = append(outputs, TransactionOutput{
+			OutputHash: &utxoKey.TxID,
+			OutputIndex: utxoKey.Index,
+			PublicKey: utxoEntry.PublicKey,
+			AmountNanos: utxoEntry.AmountNanos,
+			Spent: utxoEntry.isSpent,
+		})
+	}
+
+	result, err := tx.Model(&outputs).WherePK().OnConflict("(output_hash, output_index) DO UPDATE").Insert()
+	if err != nil {
+		return err
+	}
+
+	glog.Infof("flushUtxos: %d mappings affected %d rows", len(view.UtxoKeyToUtxoEntry), result.RowsAffected())
+
+	return nil
+}
+
+
+//
+// Chain Init
+//
+
+func (postgres *Postgres) InitGenesisBlock(params *BitCloutParams) error {
 	// Construct a node for the genesis block. Its height is zero and it has
 	// no parents. Its difficulty should be set to the initial
 	// difficulty specified in the parameters and it should be assumed to be
 	// valid and stored by the end of this function.
-	//genesisBlock := params.GenesisBlock
-	//diffTarget := NewBlockHash(params.MinDifficultyTargetHex)
-	//blockHash := NewBlockHash(params.GenesisBlockHashHex)
-	//genesisNode := NewBlockNode(
-	//	nil, // Parent
-	//	blockHash,
-	//	0, // Height
-	//	diffTarget,
-	//	BytesToBigint(ExpectedWorkForBlockHash(diffTarget)[:]), // CumWork
-	//	genesisBlock.Header, // Header
-	//	StatusHeaderValidated|StatusBlockProcessed|StatusBlockStored|StatusBlockValidated, // Status
-	//)
+	genesisBlock := params.GenesisBlock
+	diffTarget := NewBlockHash(params.MinDifficultyTargetHex)
+	blockHash := NewBlockHash(params.GenesisBlockHashHex)
+	genesisNode := NewBlockNode(
+		nil, // Parent
+		blockHash,
+		0, // Height
+		diffTarget,
+		BytesToBigint(ExpectedWorkForBlockHash(diffTarget)[:]), // CumWork
+		genesisBlock.Header, // Header
+		StatusHeaderValidated|StatusBlockProcessed|StatusBlockStored|StatusBlockValidated, // Status
+	)
 
 	// Set the fields in the db to reflect the current state of our chain.
 	//
 	// Set the best hash to the genesis block in the db since its the only node
 	// we're currently aware of. Set it for both the header chain and the block
 	// chain.
-	//if err := PutBestHash(blockHash, handle, ChainTypeBitCloutBlock); err != nil {
-	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting genesis block hash into db for block chain")
-	//}
-	//// Add the genesis block to the (hash -> block) index.
-	//if err := PutBlock(genesisBlock, handle); err != nil {
-	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting genesis block into db")
-	//}
-	//// Add the genesis block to the (height, hash -> node info) index in the db.
-	//if err := PutHeightHashToNodeInfo(genesisNode, handle, false /*bitcoinNodes*/); err != nil {
-	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting (height, hash -> node) in db")
-	//}
-	//if err := DbPutNanosPurchased(handle, params.BitCloutNanosPurchasedAtGenesis); err != nil {
-	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting genesis block hash into db for block chain")
-	//}
-	//if err := DbPutGlobalParamsEntry(handle, InitialGlobalParamsEntry); err != nil {
-	//	return errors.Wrapf(err, "PgInitGenesisBlock: Problem putting GlobalParamsEntry into db for block chain")
-	//}
+	err := postgres.UpsertBlock(genesisNode)
+	if err != nil {
+		return fmt.Errorf("PgInitGenesisBlock: Failed to upsert block: %v", err)
+	}
 
 	// We apply seed transactions here. This step is useful for setting
 	// up the blockchain with a particular set of transactions, e.g. when
@@ -425,9 +481,9 @@ func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
 	// think things are initialized because we set the best block hash at the
 	// top. We should fix this at some point so that an error in this step
 	// wipes out the best hash.
-	utxoView, err := NewUtxoView(nil, params, nil, db)
+	utxoView, err := NewUtxoView(nil, params, nil, postgres)
 	if err != nil {
-		return fmt.Errorf("InitDbWithBitCloutGenesisBlock: Error initializing UtxoView")
+		return fmt.Errorf("PgInitGenesisBlock: Error initializing UtxoView")
 	}
 
 	// Add the seed balances to the view.
@@ -448,7 +504,7 @@ func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
 
 		_, err := utxoView._addUtxo(&utxoEntry)
 		if err != nil {
-			return fmt.Errorf("InitDbWithBitCloutGenesisBlock: Error adding "+
+			return fmt.Errorf("PgInitGenesisBlock: Error adding "+
 				"seed balance at index %v ; output: %v: %v", index, txOutput, err)
 		}
 	}
@@ -458,14 +514,14 @@ func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
 		txnBytes, err := hex.DecodeString(txnHex)
 		if err != nil {
 			return fmt.Errorf(
-				"InitDbWithBitCloutGenesisBlock: Error decoding seed "+
+				"PgInitGenesisBlock: Error decoding seed "+
 					"txn HEX: %v, txn index: %v, txn hex: %v",
 				err, txnIndex, txnHex)
 		}
 		txn := &MsgBitCloutTxn{}
 		if err := txn.FromBytes(txnBytes); err != nil {
 			return fmt.Errorf(
-				"InitDbWithBitCloutGenesisBlock: Error decoding seed "+
+				"PgInitGenesisBlock: Error decoding seed "+
 					"txn BYTES: %v, txn index: %v, txn hex: %v",
 				err, txnIndex, txnHex)
 		}
@@ -478,7 +534,7 @@ func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
 			txn, txn.Hash(), 0, 0 /*blockHeight*/, false /*verifySignatures*/, true /*ignoreUtxos*/)
 		if err != nil {
 			return fmt.Errorf(
-				"InitDbWithBitCloutGenesisBlock: Error connecting transaction: %v, "+
+				"PgInitGenesisBlock: Error connecting transaction: %v, "+
 					"txn index: %v, txn hex: %v",
 				err, txnIndex, txnHex)
 		}
@@ -488,7 +544,7 @@ func PgInitGenesisBlock(db *pg.DB, params *BitCloutParams) error {
 	err = utxoView.FlushToDb()
 	if err != nil {
 		return fmt.Errorf(
-			"InitDbWithBitCloutGenesisBlock: Error flushing seed txns to DB: %v", err)
+			"PgInitGenesisBlock: Error flushing seed txns to DB: %v", err)
 	}
 
 	return nil

@@ -11,8 +11,6 @@ import (
 
 	"github.com/DataDog/datadog-go/statsd"
 	"github.com/bitclout/core/lib"
-	"github.com/go-pg/pg/v10"
-
 	"github.com/btcsuite/btcd/addrmgr"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -26,7 +24,7 @@ import (
 type Node struct {
 	Server   *lib.Server
 	chainDB  *badger.DB
-	Postgres *pg.DB
+	Postgres *lib.Postgres
 	TXIndex  *lib.TXIndex
 	Params   *lib.BitCloutParams
 	Config   *Config
@@ -118,11 +116,9 @@ func (node *Node) Start() {
 
 	// Setup postgres
 	if node.Config.PostgresURI != "" {
-		options, err := pg.ParseURL(node.Config.PostgresURI)
+		node.Postgres, err = lib.NewPostgres(node.Config.PostgresURI)
 		if err != nil {
-			glog.Fatal(err)
-		} else {
-			node.Postgres = pg.Connect(options)
+			panic(err)
 		}
 	}
 

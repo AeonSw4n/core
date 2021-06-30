@@ -3,7 +3,6 @@ package lib
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/go-pg/pg/v10"
 	"net"
 	"runtime"
 	"strings"
@@ -279,7 +278,7 @@ func NewServer(
 	_bitcloutAddrMgr *addrmgr.AddrManager,
 	_connectIps []string,
 	_db *badger.DB,
-	postgres *pg.DB,
+	postgres *Postgres,
 	_targetOutboundPeers uint32,
 	_maxInboundPeers uint32,
 	_minerPublicKeys []string,

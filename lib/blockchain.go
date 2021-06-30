@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-pg/pg/v10"
-
 	chainlib "github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/davecgh/go-spew/spew"
@@ -278,7 +276,7 @@ type OrphanBlock struct {
 
 type Blockchain struct {
 	db                              *badger.DB
-	postgres                        *pg.DB
+	postgres                        *Postgres
 	bitcoinManager                  *BitcoinManager
 	timeSource                      chainlib.MedianTimeSource
 	trustedBlockProducerPublicKeys  map[PkMapKey]bool
@@ -365,7 +363,7 @@ func (bc *Blockchain) _initChain() error {
 		var err error
 
 		if bc.postgres != nil {
-			err = PgInitGenesisBlock(bc.postgres, bc.params)
+			err = bc.postgres.InitGenesisBlock(bc.params)
 		} else {
 			err = InitDbWithBitCloutGenesisBlock(bc.params, bc.db)
 		}
@@ -390,7 +388,12 @@ func (bc *Blockchain) _initChain() error {
 	// reading blocks in height order as we do here ensures that we'll always
 	// add a block's parents, if they exist, before adding the block itself.
 	var err error
-	bc.blockIndex, err = GetBlockIndex(bc.db, false /*bitcoinNodes*/)
+	if bc.postgres != nil {
+		bc.blockIndex, err = bc.postgres.GetBlockIndex()
+	} else {
+		bc.blockIndex, err = GetBlockIndex(bc.db, false /*bitcoinNodes*/)
+	}
+
 	if err != nil {
 		return errors.Wrapf(err, "_initChain: Problem reading block index from db")
 	}
@@ -450,7 +453,7 @@ func NewBlockchain(
 	timeSource chainlib.MedianTimeSource,
 	db *badger.DB,
 	bitcoinManager *BitcoinManager,
-	postgres *pg.DB,
+	postgres *Postgres,
 	server *Server,
 ) (*Blockchain, error) {
 
@@ -1815,7 +1818,7 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		// update our data structures to actually make this connection. Do this
 		// in a transaction so that it is atomic.
 		if bc.postgres != nil {
-			if err := UpsertBlockAndTransactions(bc.postgres, nodeToValidate, bitcloutBlock); err != nil {
+			if err := bc.postgres.UpsertBlockAndTransactions(nodeToValidate, bitcloutBlock); err != nil {
 				// TODO: Make this a hard failure
 				return false, false, errors.Wrapf(err, "ProcessBlock: Problem saving block with StatusBlockStored")
 			}

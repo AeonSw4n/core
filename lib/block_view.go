@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/go-pg/pg/v10"
 	"math"
 	"math/big"
 	"reflect"
@@ -769,7 +768,7 @@ type UtxoView struct {
 
 	BitcoinManager *BitcoinManager
 	Handle         *badger.DB
-	Postgres       *pg.DB
+	Postgres       *Postgres
 	Params         *BitCloutParams
 }
 
@@ -925,12 +924,20 @@ type UtxoOperation struct {
 func (bav *UtxoView) _ResetViewMappingsAfterFlush() {
 	// Utxo data
 	bav.UtxoKeyToUtxoEntry = make(map[UtxoKey]*UtxoEntry)
-	bav.NumUtxoEntries = GetUtxoNumEntries(bav.Handle)
+	if bav.Postgres != nil {
+		// TODO
+	} else {
+		bav.NumUtxoEntries = GetUtxoNumEntries(bav.Handle)
+	}
 
 	// BitcoinExchange data
-	bav.NanosPurchased = DbGetNanosPurchased(bav.Handle)
-	bav.USDCentsPerBitcoin = DbGetUSDCentsPerBitcoinExchangeRate(bav.Handle)
-	bav.GlobalParamsEntry = DbGetGlobalParamsEntry(bav.Handle)
+	if bav.Postgres != nil {
+		// TODO
+	} else {
+		bav.NanosPurchased = DbGetNanosPurchased(bav.Handle)
+		bav.USDCentsPerBitcoin = DbGetUSDCentsPerBitcoinExchangeRate(bav.Handle)
+		bav.GlobalParamsEntry = DbGetGlobalParamsEntry(bav.Handle)
+	}
 	bav.BitcoinBurnTxIDs = make(map[BlockHash]bool)
 
 	// Forbidden block signature pub key info.
@@ -1073,7 +1080,7 @@ func NewUtxoView(
 	_handle *badger.DB,
 	_params *BitCloutParams,
 	_bitcoinManager *BitcoinManager,
-	_postgres *pg.DB,
+	_postgres *Postgres,
 ) (*UtxoView, error) {
 
 	view := UtxoView{
@@ -1081,16 +1088,21 @@ func NewUtxoView(
 		Postgres:       _postgres,
 		Params:         _params,
 		BitcoinManager: _bitcoinManager,
-		// Note that the TipHash does not get reset as part of
-		// _ResetViewMappingsAfterFlush because it is not something that is affected by a
-		// flush operation. Moreover, its value is consistent with the view regardless of
-		// whether or not the view is flushed or not. Additionally the utxo view does
-		// not concern itself with the header chain (see comment on GetBestHash for more
-		// info on that).
-		TipHash: DbGetBestHash(_handle, ChainTypeBitCloutBlock /* don't get the header chain */),
-
 		// Set everything else in _ResetViewMappings()
 	}
+
+	// Note that the TipHash does not get reset as part of
+	// _ResetViewMappingsAfterFlush because it is not something that is affected by a
+	// flush operation. Moreover, its value is consistent with the view regardless of
+	// whether or not the view is flushed or not. Additionally the utxo view does
+	// not concern itself with the header chain (see comment on GetBestHash for more
+	// info on that).
+	if view.Postgres != nil {
+		view.TipHash = nil
+	} else {
+		view.TipHash = DbGetBestHash(view.Handle, ChainTypeBitCloutBlock /* don't get the header chain */)
+	}
+
 	// This function is generally used to reset the view after a flush has been performed
 	// but we can use it here to initialize the mappings.
 	view._ResetViewMappingsAfterFlush()
@@ -1135,7 +1147,7 @@ func (bav *UtxoView) GetUtxoEntryForUtxoKey(utxoKey *UtxoKey) *UtxoEntry {
 	// db.
 	if !ok {
 		if bav.Postgres != nil {
-			utxoEntry = PgGetUtxoEntryForUtxoKey(bav.Postgres, utxoKey)
+			utxoEntry = bav.Postgres.GetUtxoEntryForUtxoKey(utxoKey)
 		} else {
 			utxoEntry = DbGetUtxoEntryForUtxoKey(bav.Handle, utxoKey)
 		}
@@ -7617,13 +7629,7 @@ func (bav *UtxoView) FlushToDb() error {
 	// Make sure everything happens inside a single transaction.
 	var err error
 	if bav.Postgres != nil {
-		err = bav.Postgres.RunInTransaction(bav.Postgres.Context(), func(tx *pg.Tx) error {
-			if err := bav.flushUtxosToPg(tx); err != nil {
-				return err
-			}
-
-			return nil
-		})
+		err = bav.Postgres.FlushView(bav)
 	} else {
 		err = bav.Handle.Update(func(txn *badger.Txn) error {
 			return bav.FlushToDbWithTxn(txn)
@@ -7642,40 +7648,6 @@ func (bav *UtxoView) FlushToDb() error {
 	// is consistent with the view regardless of whether or not the view is flushed or
 	// not.
 	bav._ResetViewMappingsAfterFlush()
-
-	return nil
-}
-
-func (bav *UtxoView) flushUtxosToPg(tx *pg.Tx) error {
-	glog.Infof("flushUtxosToPg: flushing %d mappings", len(bav.UtxoKeyToUtxoEntry))
-
-	numSpent := 0
-	var spentOutputs []TransactionOutput
-
-	for utxoKeyIter, utxoEntry := range bav.UtxoKeyToUtxoEntry {
-		// Make a copy of the iterator since it might change from under us.
-		utxoKey := utxoKeyIter
-
-		if utxoEntry.isSpent {
-			numSpent++
-			spentOutputs = append(spentOutputs, TransactionOutput{
-				OutputHash: &utxoKey.TxID,
-				OutputIndex: utxoKey.Index,
-				PublicKey: utxoEntry.PublicKey,
-				AmountNanos: utxoEntry.AmountNanos,
-				Spent: true,
-			})
-		}
-	}
-
-	result, err := tx.Model(&spentOutputs).Column("spent").Update()
-	if err != nil {
-		return err
-	}
-
-	glog.Info(result.RowsAffected())
-	glog.Info(result.RowsReturned())
-	glog.Infof("flushUtxosToPg: marked %d mappings as spent", numSpent)
 
 	return nil
 }
