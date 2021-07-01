@@ -932,7 +932,7 @@ func (bav *UtxoView) _ResetViewMappingsAfterFlush() {
 
 	// BitcoinExchange data
 	if bav.Postgres != nil {
-		// TODO
+		bav.GlobalParamsEntry = &InitialGlobalParamsEntry
 	} else {
 		bav.NanosPurchased = DbGetNanosPurchased(bav.Handle)
 		bav.USDCentsPerBitcoin = DbGetUSDCentsPerBitcoinExchangeRate(bav.Handle)
@@ -1098,7 +1098,7 @@ func NewUtxoView(
 	// not concern itself with the header chain (see comment on GetBestHash for more
 	// info on that).
 	if view.Postgres != nil {
-		view.TipHash = nil
+		view.TipHash = view.Postgres.GetChain("main").TipHash
 	} else {
 		view.TipHash = DbGetBestHash(view.Handle, ChainTypeBitCloutBlock /* don't get the header chain */)
 	}
@@ -6268,9 +6268,10 @@ func (bav *UtxoView) ConnectBlock(
 
 	// Check that the block being connected references the current tip. ConnectBlock
 	// can only add a block to the current tip. We do this to keep the API simple.
+	glog.Info(*bitcloutBlock.Header.PrevBlockHash)
+	glog.Info(*bav.TipHash)
 	if *bitcloutBlock.Header.PrevBlockHash != *bav.TipHash {
-		return nil, fmt.Errorf(
-			"ConnectBlock: Parent hash of block being connected does not match tip")
+		return nil, fmt.Errorf("ConnectBlock: Parent hash of block being connected does not match tip")
 	}
 
 	blockHeader := bitcloutBlock.Header
@@ -7630,12 +7631,14 @@ func (bav *UtxoView) FlushToDb() error {
 	var err error
 	if bav.Postgres != nil {
 		err = bav.Postgres.FlushView(bav)
-	} else {
-		err = bav.Handle.Update(func(txn *badger.Txn) error {
-			return bav.FlushToDbWithTxn(txn)
-		})
+		if err != nil {
+			return err
+		}
 	}
 
+	err = bav.Handle.Update(func(txn *badger.Txn) error {
+		return bav.FlushToDbWithTxn(txn)
+	})
 	if err != nil {
 		return err
 	}

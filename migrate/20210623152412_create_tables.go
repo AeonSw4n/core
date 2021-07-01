@@ -9,9 +9,8 @@ func init() {
 	up := func(db orm.DB) error {
 		_, err := db.Exec(`
 			CREATE TABLE chains (
-				id       BIGSERIAL PRIMARY KEY,
-				tip_hash TEXT   NOT NULL,
-                name     TEXT   NOT NULL UNIQUE
+                name     TEXT  NOT NULL PRIMARY KEY,
+				tip_hash BYTEA NOT NULL
 			)
 		`)
 		if err != nil {
@@ -20,14 +19,13 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE blocks (
-				id                BIGSERIAL PRIMARY KEY,
-				hash              BYTEA   NOT NULL,
-				parent_hash       BYTEA   NOT NULL,
+				hash              BYTEA PRIMARY KEY,
+				parent_hash       BYTEA,
 				height            BIGINT NOT NULL,
-				difficulty_target BYTEA   NOT NULL,
-				cum_work          BYTEA   NOT NULL,
+				difficulty_target BYTEA  NOT NULL,
+				cum_work          BYTEA  NOT NULL,
 				status            TEXT   NOT NULL,
-				tx_merkle_root    BYTEA   NOT NULL,
+				tx_merkle_root    BYTEA  NOT NULL,
 				timestamp         BIGINT NOT NULL,
 				nonce             BIGINT NOT NULL,
 				extra_nonce       BIGINT,

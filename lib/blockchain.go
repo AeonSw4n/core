@@ -351,7 +351,15 @@ func (bc *Blockchain) CopyBestHeaderChain() ([]*BlockNode, map[BlockHash]*BlockN
 // proceeding to read from it.
 func (bc *Blockchain) _initChain() error {
 	// See if we have a best chain hash stored in the db.
-	bestBlockHash := DbGetBestHash(bc.db, ChainTypeBitCloutBlock)
+	var bestBlockHash *BlockHash
+	if bc.postgres != nil {
+		chain := bc.postgres.GetChain("main")
+		if chain != nil {
+			bestBlockHash = chain.TipHash
+		}
+	} else {
+		bestBlockHash = DbGetBestHash(bc.db, ChainTypeBitCloutBlock)
+	}
 	// When we load up initially, the best header hash is just the tip of the best
 	// block chain, since we don't store headers for which we don't have corresponding
 	// blocks.
@@ -393,14 +401,12 @@ func (bc *Blockchain) _initChain() error {
 	} else {
 		bc.blockIndex, err = GetBlockIndex(bc.db, false /*bitcoinNodes*/)
 	}
-
 	if err != nil {
 		return errors.Wrapf(err, "_initChain: Problem reading block index from db")
 	}
 
 	// At this point the blockIndex should contain a full node tree with all
 	// nodes pointing to valid parent nodes.
-
 	{
 		// Find the tip node with the best node hash.
 		tipNode := bc.blockIndex[*bestBlockHash]
@@ -1647,12 +1653,12 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 	// it more gracefully).
 	nodeToValidate.Status |= StatusBlockProcessed
 
-	//if bc.postgres != nil {
-	//	if err := UpsertBlock(bc.postgres, nodeToValidate); err != nil {
-	//		// TODO: Make this a hard failure
-	//		glog.Errorf("ProcessBlock: Problem saving block with StatusBlockProcessed: %v", err)
-	//	}
-	//}
+	if bc.postgres != nil {
+		if err := bc.postgres.UpsertBlock(nodeToValidate); err != nil {
+			return false, false, errors.Wrapf(err,
+				"ProcessBlock: Problem saving block with StatusBlockProcessed")
+		}
+	}
 
 	if err := PutHeightHashToNodeInfo(nodeToValidate, bc.db, false /*bitcoinNodes*/); err != nil {
 		return false, false, errors.Wrapf(
@@ -1740,30 +1746,30 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 	// basic validation.
 	nodeToValidate.Status |= StatusBlockStored
 
-	//if bc.postgres != nil {
-	//	if err := UpsertBlock(bc.postgres, nodeToValidate); err != nil {
-	//		// TODO: Make this a hard failure
-	//		glog.Errorf("ProcessBlock: Problem saving block with StatusBlockStored: %v", err)
-	//	}
-	//}
-
-	err = bc.db.Update(func(txn *badger.Txn) error {
-		// Store the new block in the db under the
-		//   <blockHash> -> <serialized block>
-		// index.
-		if err := PutBlockWithTxn(txn, bitcloutBlock); err != nil {
-			return errors.Wrapf(err, "ProcessBlock: Problem calling PutBlock")
+	if bc.postgres != nil {
+		if err = bc.postgres.UpsertBlock(nodeToValidate); err != nil {
+			err = errors.Wrapf(err,"ProcessBlock: Problem saving block with StatusBlockStored")
 		}
+	} else {
+		err = bc.db.Update(func(txn *badger.Txn) error {
+			// Store the new block in the db under the
+			//   <blockHash> -> <serialized block>
+			// index.
+			if err := PutBlockWithTxn(txn, bitcloutBlock); err != nil {
+				return errors.Wrapf(err, "ProcessBlock: Problem calling PutBlock")
+			}
 
-		// Store the new block's node in our node index in the db under the
-		//   <height uin32, blockhash BlockHash> -> <node info>
-		// index.
-		if err := PutHeightHashToNodeInfoWithTxn(txn, nodeToValidate, false /*bitcoinNodes*/); err != nil {
-			return errors.Wrapf(err, "ProcessBlock: Problem calling PutHeightHashToNodeInfo before validation")
-		}
+			// Store the new block's node in our node index in the db under the
+			//   <height uin32, blockhash BlockHash> -> <node info>
+			// index.
+			if err := PutHeightHashToNodeInfoWithTxn(txn, nodeToValidate, false /*bitcoinNodes*/); err != nil {
+				return errors.Wrapf(err, "ProcessBlock: Problem calling PutHeightHashToNodeInfo before validation")
+			}
 
-		return nil
-	})
+			return nil
+		})
+	}
+
 	if err != nil {
 		return false, false, errors.Wrapf(err, "ProcessBlock: Problem storing block after basic validation")
 	}
@@ -1788,14 +1794,16 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		if err != nil {
 			return false, false, errors.Wrapf(err, "ProcessBlock: Problem initializing UtxoView in simple connect to tip")
 		}
-		// Verify that the utxo view is pointing to the current tip.
-		//if *utxoView.TipHash != *currentTip.Hash {
-		//	return false, false, fmt.Errorf("ProcessBlock: Tip hash for utxo view (%v) is "+
-		//		"not the current tip hash (%v)", *utxoView.TipHash, *currentTip)
-		//}
 
-		utxoOpsForBlock, err := utxoView.ConnectBlock(
-			bitcloutBlock, txHashes, verifySignatures)
+		// Verify that the utxo view is pointing to the current tip.
+		if *utxoView.TipHash != *currentTip.Hash {
+			//return false, false, fmt.Errorf("ProcessBlock: Tip hash for utxo view (%v) is "+
+			//	"not the current tip hash (%v)", utxoView.TipHash, currentTip.Hash)
+			glog.Errorf("ProcessBlock: Tip hash for utxo view (%v) is "+
+				"not the current tip hash (%v)", utxoView.TipHash, currentTip.Hash)
+		}
+
+		utxoOpsForBlock, err := utxoView.ConnectBlock(bitcloutBlock, txHashes, verifySignatures)
 		if err != nil {
 			if IsRuleError(err) {
 				// If we have a RuleError, mark the block as invalid before
@@ -1818,9 +1826,8 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 		// update our data structures to actually make this connection. Do this
 		// in a transaction so that it is atomic.
 		if bc.postgres != nil {
-			if err := bc.postgres.UpsertBlockAndTransactions(nodeToValidate, bitcloutBlock); err != nil {
-				// TODO: Make this a hard failure
-				return false, false, errors.Wrapf(err, "ProcessBlock: Problem saving block with StatusBlockStored")
+			if err = bc.postgres.UpsertBlockAndTransactions(nodeToValidate, bitcloutBlock); err != nil {
+				return false, false, errors.Wrapf(err, "ProcessBlock: Problem upserting block and transactions")
 			}
 		} else {
 			err = bc.db.Update(func(txn *badger.Txn) error {
