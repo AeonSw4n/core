@@ -371,7 +371,7 @@ func (bc *Blockchain) _initChain() error {
 		var err error
 
 		if bc.postgres != nil {
-			err = bc.postgres.InitGenesisBlock(bc.params)
+			err = bc.postgres.InitGenesisBlock(bc.params, bc.db)
 		} else {
 			err = InitDbWithBitCloutGenesisBlock(bc.params, bc.db)
 		}

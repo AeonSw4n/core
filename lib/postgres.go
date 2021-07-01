@@ -3,6 +3,7 @@ package lib
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/dgraph-io/badger/v3"
 	"github.com/go-pg/pg/v10"
 	"github.com/golang/glog"
 )
@@ -499,7 +500,7 @@ func (postgres *Postgres) flushUtxos(tx *pg.Tx, view *UtxoView) error {
 // Chain Init
 //
 
-func (postgres *Postgres) InitGenesisBlock(params *BitCloutParams) error {
+func (postgres *Postgres) InitGenesisBlock(params *BitCloutParams, db *badger.DB) error {
 	// Construct a node for the genesis block. Its height is zero and it has no parents. Its difficulty should be
 	// set to the initial difficulty specified in the parameters and it should be assumed to be
 	// valid and stored by the end of this function.
@@ -535,7 +536,7 @@ func (postgres *Postgres) InitGenesisBlock(params *BitCloutParams) error {
 	// We apply seed transactions here. This step is useful for setting
 	// up the blockchain with a particular set of transactions, e.g. when
 	// hard forking the chain.
-	utxoView, err := NewUtxoView(nil, params, nil, postgres)
+	utxoView, err := NewUtxoView(db, params, nil, postgres)
 	if err != nil {
 		return fmt.Errorf("InitGenesisBlock: Error initializing UtxoView")
 	}
