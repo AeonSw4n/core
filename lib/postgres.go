@@ -206,7 +206,6 @@ func (postgres *Postgres) UpsertBlockTx(tx *pg.Tx, blockNode *BlockNode) error {
 }
 
 func (postgres *Postgres) GetBlockIndex() (map[BlockHash]*BlockNode, error) {
-	glog.Info("Getting block index")
 	var blocks []Block
 	err := postgres.db.Model(&blocks).Select()
 	if err != nil {
@@ -316,8 +315,6 @@ func (postgres *Postgres) InsertTransactionTx(tx *pg.Tx, txn *MsgBitCloutTxn, bl
 			PublicKey:   output.PublicKey,
 			AmountNanos: output.AmountNanos,
 		}
-
-		glog.Infof("Insert %s:%d", txnHash, uint32(i))
 
 		_, err = tx.Model(transactionOutput).Returning("NULL").Insert()
 		if err != nil {
@@ -471,8 +468,6 @@ func (postgres *Postgres) FlushView(view *UtxoView) error {
 }
 
 func (postgres *Postgres) flushUtxos(tx *pg.Tx, view *UtxoView) error {
-	glog.Infof("flushUtxos: flushing %d mappings", len(view.UtxoKeyToUtxoEntry))
-
 	var outputs []TransactionOutput
 	for utxoKeyIter, utxoEntry := range view.UtxoKeyToUtxoEntry {
 		// Make a copy of the iterator since it might change from under us.
@@ -491,7 +486,7 @@ func (postgres *Postgres) flushUtxos(tx *pg.Tx, view *UtxoView) error {
 		return err
 	}
 
-	glog.Infof("flushUtxos: %d mappings affected %d rows", len(view.UtxoKeyToUtxoEntry), result.RowsAffected())
+	glog.Debugf("flushUtxos: %d mappings affected %d rows", len(view.UtxoKeyToUtxoEntry), result.RowsAffected())
 
 	return nil
 }

@@ -6268,8 +6268,6 @@ func (bav *UtxoView) ConnectBlock(
 
 	// Check that the block being connected references the current tip. ConnectBlock
 	// can only add a block to the current tip. We do this to keep the API simple.
-	glog.Info(*bitcloutBlock.Header.PrevBlockHash)
-	glog.Info(*bav.TipHash)
 	if *bitcloutBlock.Header.PrevBlockHash != *bav.TipHash {
 		return nil, fmt.Errorf("ConnectBlock: Parent hash of block being connected does not match tip")
 	}
@@ -7582,10 +7580,14 @@ func (bav *UtxoView) _flushBalanceEntriesToDbWithTxn(txn *badger.Txn) error {
 }
 
 func (bav *UtxoView) FlushToDbWithTxn(txn *badger.Txn) error {
-	// Flush to BadgerDB.
-	if err := bav._flushUtxosToDbWithTxn(txn); err != nil {
-		return err
+	// Only flush to BadgerDB if Postgres is disabled
+	if bav.Postgres == nil {
+		if err := bav._flushUtxosToDbWithTxn(txn); err != nil {
+			return err
+		}
 	}
+
+	// Always flush to BadgerDB.
 	if err := bav._flushBitcoinExchangeDataWithTxn(txn); err != nil {
 		return err
 	}

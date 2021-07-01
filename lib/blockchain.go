@@ -1829,6 +1829,11 @@ func (bc *Blockchain) ProcessBlock(bitcloutBlock *MsgBitCloutBlock, verifySignat
 			if err = bc.postgres.UpsertBlockAndTransactions(nodeToValidate, bitcloutBlock); err != nil {
 				return false, false, errors.Wrapf(err, "ProcessBlock: Problem upserting block and transactions")
 			}
+
+			// Write the modified utxo set to the view.
+			if err := utxoView.FlushToDb(); err != nil {
+				return false, false, errors.Wrapf(err, "ProcessBlock: Problem flushing view to db")
+			}
 		} else {
 			err = bc.db.Update(func(txn *badger.Txn) error {
 				// This will update the node's status.
