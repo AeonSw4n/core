@@ -22,6 +22,7 @@ require (
 	github.com/dgraph-io/ristretto v0.1.0 // indirect
 	github.com/ethereum/go-ethereum v1.9.19
 	github.com/gernest/mention v2.0.0+incompatible
+	github.com/go-pg/pg/extra/pgdebug v0.2.0
 	github.com/go-pg/pg/v10 v10.10.0
 	github.com/golang/glog v0.0.0-20210429001901-424d2337a529
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect

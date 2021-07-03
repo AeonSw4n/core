@@ -144,7 +144,7 @@ func NewTestBlockchain() (*Blockchain, *BitCloutParams, *badger.DB) {
 	paramsCopy := BitCloutTestnetParams
 
 	chain, err := NewBlockchain([]string{blockSignerPk}, 0, &paramsCopy,
-		timesource, db, nil, nil)
+		timesource, db, nil, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func NewLowDifficultyBlockchainWithParams(params *BitCloutParams) (
 	// Temporarily modify the seed balances to make a specific public
 	// key have some BitClout
 	chain, err := NewBlockchain([]string{blockSignerPk}, 0,
-		&paramsCopy, timesource, db, nil, nil)
+		&paramsCopy, timesource, db, nil, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

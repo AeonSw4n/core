@@ -199,7 +199,7 @@ type BitCloutMessage interface {
 }
 
 // TxnType specifies the type for a transaction message.
-type TxnType uint64
+type TxnType uint8
 
 const (
 	TxnTypeUnset TxnType = 0

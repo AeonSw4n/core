@@ -924,20 +924,13 @@ type UtxoOperation struct {
 func (bav *UtxoView) _ResetViewMappingsAfterFlush() {
 	// Utxo data
 	bav.UtxoKeyToUtxoEntry = make(map[UtxoKey]*UtxoEntry)
-	if bav.Postgres != nil {
-		// TODO
-	} else {
-		bav.NumUtxoEntries = GetUtxoNumEntries(bav.Handle)
-	}
+	// TODO: Deprecate this value
+	bav.NumUtxoEntries = GetUtxoNumEntries(bav.Handle)
 
 	// BitcoinExchange data
-	if bav.Postgres != nil {
-		bav.GlobalParamsEntry = &InitialGlobalParamsEntry
-	} else {
-		bav.NanosPurchased = DbGetNanosPurchased(bav.Handle)
-		bav.USDCentsPerBitcoin = DbGetUSDCentsPerBitcoinExchangeRate(bav.Handle)
-		bav.GlobalParamsEntry = DbGetGlobalParamsEntry(bav.Handle)
-	}
+	bav.NanosPurchased = DbGetNanosPurchased(bav.Handle)
+	bav.USDCentsPerBitcoin = DbGetUSDCentsPerBitcoinExchangeRate(bav.Handle)
+	bav.GlobalParamsEntry = DbGetGlobalParamsEntry(bav.Handle)
 	bav.BitcoinBurnTxIDs = make(map[BlockHash]bool)
 
 	// Forbidden block signature pub key info.
@@ -3436,15 +3429,13 @@ func (bav *UtxoView) _connectBitcoinExchange(
 		return 0, 0, nil, RuleErrorDeflationBombForbidsMintingAnyMoreBitClout
 	}
 
-	if bav.BitcoinManager == nil ||
-		!bav.BitcoinManager.IsCurrent(false /*considerCumWork*/) {
-
-		return 0, 0, nil, fmt.Errorf("_connectBitcoinExchange: BitcoinManager "+
-			"must be non-nil and time-current in order to connect "+
-			"BitcoinExchange transactions: %v", bav.BitcoinManager.IsCurrent(false /*considerCumWork*/))
-	}
-	// At this point we are confident that we have a non-nil time-current
-	// BitcoinManager we can refer to for validation purposes.
+	//if bav.BitcoinManager == nil ||
+	//	!bav.BitcoinManager.IsCurrent(false /*considerCumWork*/) {
+	//
+	//	return 0, 0, nil, fmt.Errorf("_connectBitcoinExchange: BitcoinManager "+
+	//		"must be non-nil and time-current in order to connect "+
+	//		"BitcoinExchange transactions: %v", bav.BitcoinManager.IsCurrent(false /*considerCumWork*/))
+	//}
 
 	// Check that the transaction has the right TxnType.
 	if txn.TxnMeta.GetTxnType() != TxnTypeBitcoinExchange {
@@ -3490,11 +3481,9 @@ func (bav *UtxoView) _connectBitcoinExchange(
 		return 0, 0, nil, RuleErrorBitcoinExchangeDoubleSpendingBitcoinTransaction
 	}
 
-	// If this is a forgiven BitcoinExchange txn then skip all checks
-	if IsForgivenBitcoinTransaction(txn) {
-		checkMerkleProof = false
-		minBitcoinBurnWork = 0
-	}
+	// We're no longer checking bitcoin exchange txns
+	checkMerkleProof = false
+	minBitcoinBurnWork = 0
 
 	if checkMerkleProof {
 		// Check that the BitcoinBlockHash exists in our main Bitcoin header chain.
@@ -3608,8 +3597,7 @@ func (bav *UtxoView) _connectBitcoinExchange(
 	// that should receive the BitClout we are going to create.
 	usdCentsPerBitcoin := bav.GetCurrentUSDCentsPerBitcoin()
 	// Compute the amount of BitClout that we should create as a result of this transaction.
-	nanosToCreate := CalcNanosToCreate(
-		bav.NanosPurchased, uint64(totalBurnOutput), usdCentsPerBitcoin)
+	nanosToCreate := CalcNanosToCreate(bav.NanosPurchased, uint64(totalBurnOutput), usdCentsPerBitcoin)
 
 	// Compute the amount of BitClout that the user will receive. Note
 	// that we allocate a small fee to the miner to incentivize her to include the

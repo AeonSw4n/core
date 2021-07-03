@@ -29,7 +29,8 @@ func init() {
 				timestamp         BIGINT NOT NULL,
 				nonce             BIGINT NOT NULL,
 				extra_nonce       BIGINT,
-				version           INT
+				version           INT,
+				notified          BOOL NOT NULL
 			)
 		`)
 		if err != nil {
@@ -38,25 +39,13 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE transactions (
-				id         BIGSERIAL PRIMARY KEY,
-				hash       BYTEA NOT NULL,
+				hash       BYTEA PRIMARY KEY,
 				block_hash BYTEA NOT NULL,
+				type       SMALLINT NOT NULL,
 				public_key BYTEA,
 				extra_data JSONB,
 				r BYTEA,
 				s BYTEA
-			);
-		`)
-		if err != nil {
-			return err
-		}
-
-		_, err = db.Exec(`
-			CREATE TABLE transaction_inputs (
-				id          BIGSERIAL PRIMARY KEY,
-				output_hash BYTEA NOT NULL,
-				input_hash  BYTEA NOT NULL,
-				input_index INT   NOT NULL
 			);
 		`)
 		if err != nil {
@@ -71,6 +60,8 @@ func init() {
 				public_key   BYTEA  NOT NULL,
 				amount_nanos BIGINT NOT NULL,
 				spent        BOOL   NOT NULL,
+				input_hash   BYTEA,
+				input_index  INT,
 
 				PRIMARY KEY (output_hash, output_index)
 			);
@@ -81,7 +72,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_block_rewards (
-				id         BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				extra_data BYTEA NOT NULL
 			);
 		`)
@@ -91,7 +82,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_bitcoin_exchanges (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				bitcoin_block_hash  BYTEA NOT NULL,
 				bitcoin_merkle_root BYTEA NOT NULL
 			);
@@ -102,7 +93,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_private_messages (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				recipient_public_key BYTEA  NOT NULL,
 				encrypted_text       BYTEA  NOT NULL,
 				timestamp_nanos      BIGINT NOT NULL
@@ -114,7 +105,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_submit_posts (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				post_hash_to_modify BYTEA  NOT NULL,
 				parent_stake_id     BYTEA  NOT NULL,
 				body                BYTEA  NOT NULL,
@@ -128,7 +119,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_update_bitcoin_usd_exchange_rates (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				usd_cents_per_bitcoin BIGINT NOT NULL
 			);
 		`)
@@ -138,7 +129,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_update_profiles (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				profile_public_key       BYTEA,
 				new_username             BYTEA,
 				new_description          BYTEA,
@@ -152,7 +143,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_follows (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				followed_public_key BYTEA NOT NULL,
 				is_unfollow         BOOL NOT NULL
 			);
@@ -163,7 +154,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_likes (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				liked_post_hash BYTEA NOT NULL,
 				is_unlike       BOOL NOT NULL
 			);
@@ -174,7 +165,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_creator_coins (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				profile_public_key              BYTEA NOT NULL,
 				operation_type                  SMALLINT NOT NULL,
 				bit_clout_to_sell_nanos         BIGINT NOT NULL,
@@ -190,7 +181,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_creator_coin_transfers (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				profile_public_key             BYTEA NOT NULL,
 				creator_coin_to_transfer_nanos BIGINT NOT NULL,
 				receiver_public_key            BYTEA NOT NULL
@@ -202,7 +193,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_swap_identities (
-				id BIGSERIAL PRIMARY KEY,
+				transaction BYTEA PRIMARY KEY,
 				from_public_key BYTEA NOT NULL,
 				to_public_key   BYTEA NOT NULL
 			);
@@ -212,12 +203,15 @@ func init() {
 		}
 
 		_, err = db.Exec(`
-			CREATE TABLE utxo_entries (
-				id BIGSERIAL PRIMARY KEY,
-				amount_nanos BIGINT NOT NULL,
-				public_key   BYTEA NOT NULL,
-				block_height BIGINT NOT NULL,
-				utxo_type    SMALLINT NOT NULL
+			CREATE TABLE notifications (
+				transaction BYTEA PRIMARY KEY,
+				mined       BOOL NOT NULL,
+				to_user     BYTEA NOT NULL,
+				from_user   BYTEA NOT NULL,
+				action      TEXT NOT NULL,
+				amount      BIGINT,
+				post_hash   BYTEA,
+				timestamp   BIGINT NOT NULL
 			);
 		`)
 		if err != nil {
@@ -232,7 +226,6 @@ func init() {
 			DROP TABLE chains;
 			DROP TABLE blocks;
 			DROP TABLE transactions;
-			DROP TABLE transaction_inputs;
 			DROP TABLE transaction_outputs;
 			DROP TABLE metadata_block_rewards;
 			DROP TABLE metadata_bitcoin_exchanges;
@@ -245,7 +238,7 @@ func init() {
 			DROP TABLE metadata_creator_coins;
 			DROP TABLE metadata_creator_coin_transfers;
 			DROP TABLE metadata_swap_identities;
-			DROP TABLE utxo_entries;
+			DROP TABLE notifications;
 		`)
 		return err
 	}

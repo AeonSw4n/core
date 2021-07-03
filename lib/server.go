@@ -124,6 +124,8 @@ type Server struct {
 	hasProcessedFirstTransactionBundle bool
 
 	statsdClient *statsd.Client
+
+	Notifier *Notifier
 }
 
 func (srv *Server) HasProcessedFirstTransactionBundle() bool {
@@ -431,6 +433,9 @@ func NewServer(
 	srv.requestTimeoutSeconds = 10
 
 	srv.statsdClient = statsd
+
+	srv.Notifier = NewNotifier(_chain, postgres)
+	srv.Notifier.Start()
 
 	// Start the mempool stats reporter
 	if srv.statsdClient != nil {
