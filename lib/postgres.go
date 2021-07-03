@@ -75,9 +75,18 @@ type Transaction struct {
 	S         *BlockHash
 
 	// Relationships
-	Outputs        []*TransactionOutput `pg:"rel:has-many,join_fk:output_hash"`
-	MetadataLike   *MetadataLike        `pg:"rel:belongs-to,join_fk:transaction"`
-	MetadataFollow *MetadataFollow      `pg:"rel:belongs-to,join_fk:transaction"`
+	Outputs                     []*TransactionOutput         `pg:"rel:has-many,join_fk:output_hash"`
+	MetadataBlockReward         *MetadataBlockReward         `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataBitcoinExchange     *MetadataBitcoinExchange     `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataPrivateMessage      *MetadataPrivateMessage      `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataSubmitPost          *MetadataSubmitPost          `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataUpdateExchangeRate  *MetadataUpdateExchangeRate  `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataUpdateProfile       *MetadataUpdateProfile       `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataFollow              *MetadataFollow              `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataLike                *MetadataLike                `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataCreatorCoin         *MetadataCreatorCoin         `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataCreatorCoinTransfer *MetadataCreatorCoinTransfer `pg:"rel:belongs-to,join_fk:transaction_hash"`
+	MetadataSwapIdentity        *MetadataSwapIdentity        `pg:"rel:belongs-to,join_fk:transaction_hash"`
 }
 
 // TransactionOutput represents BitCloutOutput, BitCloutInput, and UtxoEntry
@@ -94,13 +103,13 @@ type TransactionOutput struct {
 
 // MetadataBlockReward represents BlockRewardMetadataa
 type MetadataBlockReward struct {
-	Transaction *BlockHash `pg:",pk"`
-	ExtraData   []byte
+	TransactionHash *BlockHash `pg:",pk"`
+	ExtraData       []byte
 }
 
 // MetadataBitcoinExchange represents BitcoinExchangeMetadata
 type MetadataBitcoinExchange struct {
-	Transaction       *BlockHash `pg:",pk"`
+	TransactionHash   *BlockHash `pg:",pk"`
 	BitcoinBlockHash  *BlockHash
 	BitcoinMerkleRoot *BlockHash
 	// Not storing BitcoinTransaction *wire.MsgTx
@@ -109,7 +118,7 @@ type MetadataBitcoinExchange struct {
 
 // MetadataPrivateMessage represents PrivateMessageMetadata
 type MetadataPrivateMessage struct {
-	Transaction        *BlockHash `pg:",pk"`
+	TransactionHash    *BlockHash `pg:",pk"`
 	RecipientPublicKey []byte
 	EncryptedText      []byte
 	TimestampNanos     uint64
@@ -117,23 +126,23 @@ type MetadataPrivateMessage struct {
 
 // MetadataSubmitPost represents SubmitPostMetadata
 type MetadataSubmitPost struct {
-	Transaction      *BlockHash `pg:",pk"`
-	PostHashToModify []byte
-	ParentStakeID    []byte
+	TransactionHash  *BlockHash `pg:",pk"`
+	PostHashToModify *BlockHash
+	ParentStakeID    *BlockHash
 	Body             []byte
 	TimestampNanos   uint64
 	IsHidden         bool `pg:",use_zero"`
 }
 
-// MetadataUpdateBitcoinUSDExchangeRate represents UpdateBitcoinUSDExchangeRateMetadataa
-type MetadataUpdateBitcoinUSDExchangeRate struct {
-	Transaction        *BlockHash `pg:",pk"`
+// MetadataUpdateExchangeRate represents UpdateBitcoinUSDExchangeRateMetadataa
+type MetadataUpdateExchangeRate struct {
+	TransactionHash    *BlockHash `pg:",pk"`
 	USDCentsPerBitcoin uint64     `pg:",use_zero"`
 }
 
 // MetadataUpdateProfile represents UpdateProfileMetadata
 type MetadataUpdateProfile struct {
-	Transaction           *BlockHash `pg:",pk"`
+	TransactionHash       *BlockHash `pg:",pk"`
 	ProfilePublicKey      []byte
 	NewUsername           []byte
 	NewDescription        []byte
@@ -143,21 +152,21 @@ type MetadataUpdateProfile struct {
 
 // MetadataFollow represents FollowMetadata
 type MetadataFollow struct {
-	Transaction       *BlockHash `pg:",pk"`
+	TransactionHash   *BlockHash `pg:",pk"`
 	FollowedPublicKey []byte
 	IsUnfollow        bool `pg:",use_zero"`
 }
 
 // MetadataLike represents LikeMetadata
 type MetadataLike struct {
-	Transaction   *BlockHash `pg:",pk"`
-	LikedPostHash *BlockHash
-	IsUnlike      bool `pg:",use_zero"`
+	TransactionHash *BlockHash `pg:",pk"`
+	LikedPostHash   *BlockHash
+	IsUnlike        bool `pg:",use_zero"`
 }
 
 // MetadataCreatorCoin represents CreatorCoinMetadataa
 type MetadataCreatorCoin struct {
-	Transaction                 *BlockHash `pg:",pk"`
+	TransactionHash             *BlockHash `pg:",pk"`
 	ProfilePublicKey            []byte
 	OperationType               CreatorCoinOperationType `pg:",use_zero"`
 	BitCloutToSellNanos         uint64                   `pg:",use_zero"`
@@ -169,7 +178,7 @@ type MetadataCreatorCoin struct {
 
 // MetadataCreatorCoinTransfer represents CreatorCoinTransferMetadataa
 type MetadataCreatorCoinTransfer struct {
-	Transaction                *BlockHash `pg:",pk"`
+	TransactionHash            *BlockHash `pg:",pk"`
 	ProfilePublicKey           []byte
 	CreatorCoinToTransferNanos uint64 `pg:",use_zero"`
 	ReceiverPublicKey          []byte
@@ -177,21 +186,37 @@ type MetadataCreatorCoinTransfer struct {
 
 // MetadataSwapIdentity represents SwapIdentityMetadataa
 type MetadataSwapIdentity struct {
-	Transaction   *BlockHash `pg:",pk"`
-	FromPublicKey []byte
-	ToPublicKey   []byte
+	TransactionHash *BlockHash `pg:",pk"`
+	FromPublicKey   []byte
+	ToPublicKey     []byte
 }
 
 type Notification struct {
-	Transaction *BlockHash `pg:",pk"`
-	Mined       bool
-	ToUser      []byte
-	FromUser    []byte
-	Action      string
-	Amount      uint64
-	PostHash    *BlockHash
-	Timestamp   uint64
+	TransactionHash *BlockHash `pg:",pk"`
+	Mined           bool
+	ToUser          []byte
+	FromUser        []byte
+	OtherUser       []byte
+	Type            NotificationType
+	Amount          uint64
+	PostHash        *BlockHash
+	Timestamp       uint64
 }
+
+type NotificationType uint8
+
+const (
+	NotificationUnknown NotificationType = iota
+	NotificationSendClout
+	NotificationLike
+	NotificationFollow
+	NotificationCoinPurchase
+	NotificationCoinTransfer
+	NotificationCoinDiamond
+	NotificationPostMention
+	NotificationPostReply
+	NotificationPostReclout
+)
 
 //
 // Blockchain and Transactions
@@ -305,7 +330,7 @@ func (postgres *Postgres) InsertTransactionsTx(tx *pg.Tx, bitCloutTxns []*MsgBit
 	var metadataPrivateMessages []*MetadataPrivateMessage
 	var metadataSubmitPosts []*MetadataSubmitPost
 	var metadataUpdateProfiles []*MetadataUpdateProfile
-	var metadataExchangeRates []*MetadataUpdateBitcoinUSDExchangeRate
+	var metadataExchangeRates []*MetadataUpdateExchangeRate
 	var metadataFollows []*MetadataFollow
 	var metadataLikes []*MetadataLike
 	var metadataCreatorCoins []*MetadataCreatorCoin
@@ -355,30 +380,36 @@ func (postgres *Postgres) InsertTransactionsTx(tx *pg.Tx, bitCloutTxns []*MsgBit
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeBlockReward {
 			txMeta := txn.TxnMeta.(*BlockRewardMetadataa)
 			metadataBlockRewards = append(metadataBlockRewards, &MetadataBlockReward{
-				Transaction: txnHash,
-				ExtraData:   txMeta.ExtraData,
+				TransactionHash: txnHash,
+				ExtraData:       txMeta.ExtraData,
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeBitcoinExchange {
 			txMeta := txn.TxnMeta.(*BitcoinExchangeMetadata)
 			metadataBitcoinExchanges = append(metadataBitcoinExchanges, &MetadataBitcoinExchange{
-				Transaction:       txnHash,
+				TransactionHash:   txnHash,
 				BitcoinBlockHash:  txMeta.BitcoinBlockHash,
 				BitcoinMerkleRoot: txMeta.BitcoinMerkleRoot,
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypePrivateMessage {
 			txMeta := txn.TxnMeta.(*PrivateMessageMetadata)
 			metadataPrivateMessages = append(metadataPrivateMessages, &MetadataPrivateMessage{
-				Transaction:        txnHash,
+				TransactionHash:    txnHash,
 				RecipientPublicKey: txMeta.RecipientPublicKey,
 				EncryptedText:      txMeta.EncryptedText,
 				TimestampNanos:     txMeta.TimestampNanos,
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeSubmitPost {
 			txMeta := txn.TxnMeta.(*SubmitPostMetadata)
+
+			postHashToModify := &BlockHash{}
+			parentStakeId := &BlockHash{}
+			copy(postHashToModify[:], txMeta.PostHashToModify)
+			copy(parentStakeId[:], txMeta.ParentStakeID)
+
 			metadataSubmitPosts = append(metadataSubmitPosts, &MetadataSubmitPost{
-				Transaction:      txnHash,
-				PostHashToModify: txMeta.PostHashToModify,
-				ParentStakeID:    txMeta.ParentStakeID,
+				TransactionHash:  txnHash,
+				PostHashToModify: postHashToModify,
+				ParentStakeID:    parentStakeId,
 				Body:             txMeta.Body,
 				TimestampNanos:   txMeta.TimestampNanos,
 				IsHidden:         txMeta.IsHidden,
@@ -386,7 +417,7 @@ func (postgres *Postgres) InsertTransactionsTx(tx *pg.Tx, bitCloutTxns []*MsgBit
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeUpdateProfile {
 			txMeta := txn.TxnMeta.(*UpdateProfileMetadata)
 			metadataUpdateProfiles = append(metadataUpdateProfiles, &MetadataUpdateProfile{
-				Transaction:           txnHash,
+				TransactionHash:       txnHash,
 				ProfilePublicKey:      txMeta.ProfilePublicKey,
 				NewUsername:           txMeta.NewUsername,
 				NewProfilePic:         txMeta.NewProfilePic,
@@ -394,28 +425,28 @@ func (postgres *Postgres) InsertTransactionsTx(tx *pg.Tx, bitCloutTxns []*MsgBit
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeUpdateBitcoinUSDExchangeRate {
 			txMeta := txn.TxnMeta.(*UpdateBitcoinUSDExchangeRateMetadataa)
-			metadataExchangeRates = append(metadataExchangeRates, &MetadataUpdateBitcoinUSDExchangeRate{
-				Transaction:        txnHash,
+			metadataExchangeRates = append(metadataExchangeRates, &MetadataUpdateExchangeRate{
+				TransactionHash:    txnHash,
 				USDCentsPerBitcoin: txMeta.USDCentsPerBitcoin,
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeFollow {
 			txMeta := txn.TxnMeta.(*FollowMetadata)
 			metadataFollows = append(metadataFollows, &MetadataFollow{
-				Transaction:       txnHash,
+				TransactionHash:   txnHash,
 				FollowedPublicKey: txMeta.FollowedPublicKey,
 				IsUnfollow:        txMeta.IsUnfollow,
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeLike {
 			txMeta := txn.TxnMeta.(*LikeMetadata)
 			metadataLikes = append(metadataLikes, &MetadataLike{
-				Transaction:   txnHash,
-				LikedPostHash: txMeta.LikedPostHash,
-				IsUnlike:      txMeta.IsUnlike,
+				TransactionHash: txnHash,
+				LikedPostHash:   txMeta.LikedPostHash,
+				IsUnlike:        txMeta.IsUnlike,
 			})
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeCreatorCoin {
 			txMeta := txn.TxnMeta.(*CreatorCoinMetadataa)
 			metadataCreatorCoins = append(metadataCreatorCoins, &MetadataCreatorCoin{
-				Transaction:                 txnHash,
+				TransactionHash:             txnHash,
 				ProfilePublicKey:            txMeta.ProfilePublicKey,
 				OperationType:               txMeta.OperationType,
 				BitCloutToSellNanos:         txMeta.BitCloutToSellNanos,
@@ -427,7 +458,7 @@ func (postgres *Postgres) InsertTransactionsTx(tx *pg.Tx, bitCloutTxns []*MsgBit
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeCreatorCoinTransfer {
 			txMeta := txn.TxnMeta.(*CreatorCoinTransferMetadataa)
 			metadataCreatorCoinTransfers = append(metadataCreatorCoinTransfers, &MetadataCreatorCoinTransfer{
-				Transaction:                txnHash,
+				TransactionHash:            txnHash,
 				ProfilePublicKey:           txMeta.ProfilePublicKey,
 				CreatorCoinToTransferNanos: txMeta.CreatorCoinToTransferNanos,
 				ReceiverPublicKey:          txMeta.ReceiverPublicKey,
@@ -435,9 +466,9 @@ func (postgres *Postgres) InsertTransactionsTx(tx *pg.Tx, bitCloutTxns []*MsgBit
 		} else if txn.TxnMeta.GetTxnType() == TxnTypeSwapIdentity {
 			txMeta := txn.TxnMeta.(*SwapIdentityMetadataa)
 			metadataSwapIdentities = append(metadataSwapIdentities, &MetadataSwapIdentity{
-				Transaction:   txnHash,
-				FromPublicKey: txMeta.FromPublicKey,
-				ToPublicKey:   txMeta.ToPublicKey,
+				TransactionHash: txnHash,
+				FromPublicKey:   txMeta.FromPublicKey,
+				ToPublicKey:     txMeta.ToPublicKey,
 			})
 		} else {
 			return fmt.Errorf("InsertTransactionTx: Unimplemented txn type %v", txn.TxnMeta.GetTxnType().String())

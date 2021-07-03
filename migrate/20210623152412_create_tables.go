@@ -72,7 +72,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_block_rewards (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				extra_data BYTEA NOT NULL
 			);
 		`)
@@ -82,7 +82,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_bitcoin_exchanges (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				bitcoin_block_hash  BYTEA NOT NULL,
 				bitcoin_merkle_root BYTEA NOT NULL
 			);
@@ -93,7 +93,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_private_messages (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				recipient_public_key BYTEA  NOT NULL,
 				encrypted_text       BYTEA  NOT NULL,
 				timestamp_nanos      BIGINT NOT NULL
@@ -105,7 +105,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_submit_posts (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				post_hash_to_modify BYTEA  NOT NULL,
 				parent_stake_id     BYTEA  NOT NULL,
 				body                BYTEA  NOT NULL,
@@ -118,8 +118,8 @@ func init() {
 		}
 
 		_, err = db.Exec(`
-			CREATE TABLE metadata_update_bitcoin_usd_exchange_rates (
-				transaction BYTEA PRIMARY KEY,
+			CREATE TABLE metadata_update_exchange_rates (
+				transaction_hash BYTEA PRIMARY KEY,
 				usd_cents_per_bitcoin BIGINT NOT NULL
 			);
 		`)
@@ -129,7 +129,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_update_profiles (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				profile_public_key       BYTEA,
 				new_username             BYTEA,
 				new_description          BYTEA,
@@ -143,7 +143,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_follows (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				followed_public_key BYTEA NOT NULL,
 				is_unfollow         BOOL NOT NULL
 			);
@@ -154,7 +154,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_likes (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				liked_post_hash BYTEA NOT NULL,
 				is_unlike       BOOL NOT NULL
 			);
@@ -165,7 +165,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_creator_coins (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				profile_public_key              BYTEA NOT NULL,
 				operation_type                  SMALLINT NOT NULL,
 				bit_clout_to_sell_nanos         BIGINT NOT NULL,
@@ -181,7 +181,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_creator_coin_transfers (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				profile_public_key             BYTEA NOT NULL,
 				creator_coin_to_transfer_nanos BIGINT NOT NULL,
 				receiver_public_key            BYTEA NOT NULL
@@ -193,7 +193,7 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE metadata_swap_identities (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				from_public_key BYTEA NOT NULL,
 				to_public_key   BYTEA NOT NULL
 			);
@@ -204,10 +204,11 @@ func init() {
 
 		_, err = db.Exec(`
 			CREATE TABLE notifications (
-				transaction BYTEA PRIMARY KEY,
+				transaction_hash BYTEA PRIMARY KEY,
 				mined       BOOL NOT NULL,
 				to_user     BYTEA NOT NULL,
 				from_user   BYTEA NOT NULL,
+				other_user  BYTEA,
 				action      TEXT NOT NULL,
 				amount      BIGINT,
 				post_hash   BYTEA,
