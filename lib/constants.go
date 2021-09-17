@@ -12,6 +12,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/golang/glog"
 	"github.com/shibukawa/configdir"
 )
 
@@ -100,9 +101,28 @@ var (
 	// the database, the user would lose the creator coins they purchased.
 	BuyCreatorCoinAfterDeletedBalanceEntryFixBlockHeight = uint32(39713)
 
-  // ParamUpdaterProfileUpdateFixBlockHeight defines a block height after which the protocol uses the update profile
+	// ParamUpdaterProfileUpdateFixBlockHeight defines a block height after which the protocol uses the update profile
 	// txMeta's ProfilePublicKey when the Param Updater is creating a profile for ProfilePublicKey.
 	ParamUpdaterProfileUpdateFixBlockHeight = uint32(39713)
+
+	// UpdateProfileFixBlockHeight defines the height at which a patch was added to prevent user from
+	// updating the profile entry for arbitrary public keys that do not have existing profile entries.
+	UpdateProfileFixBlockHeight = uint32(46165)
+
+	// BrokenNFTBidsFixBlockHeight defines the height at which the bitclout balance index takes effect
+	// for accepting NFT bids.  This is used to fix a fork that was created by nodes running with a corrupted
+	// bitclout balance index, allowing bids to be submitted that were greater than the user's bitclout balance.
+	BrokenNFTBidsFixBlockHeight = uint32(46917)
+
+	// BitCloutDiamondsBlockHeight defines the height at which diamonds will be given in CLOUT
+	// rather than in creator coin.
+	// Triggers: 3pm PT on 8/16/2021
+	BitCloutDiamondsBlockHeight = uint32(52112)
+
+	// NFTTransfersBlockHeight defines the height at which NFT transfer txns, accept NFT
+	// transfer txns, NFT burn txns, and AuthorizeDerivedKey txns will be accepted.
+	// Triggers: 12PM PT on 9/15/2021
+	NFTTransferOrBurnAndDerivedKeysBlockHeight = uint32(60743)
 )
 
 func (nt NetworkType) String() string {
@@ -153,113 +173,9 @@ type BitCloutParams struct {
 	// incorporated into the address manager.
 	DNSSeedGenerators [][]string
 
-	// BitcoinDNSSeeds is a list of seed hosts to use to bootstrap connections
-	// to Bitcoin nodes. We connect to Bitcoin nodes to support the exchange
-	// functionality that allows people to buy BitClout with Bitcoin.
-	BitcoinDNSSeeds []string
-
-	// The minimum amount of work a Bitcoin chain can have before we consider
-	// it valid.
-	BitcoinMinChainWorkHex string
-
-	// The default port to connect to bitcoin nodes on.
-	BitcoinDefaultPort string
-
 	// The network parameter for Bitcoin messages as defined by the btcd library.
 	// Useful for certain function calls we make to this library.
 	BitcoinBtcdParams *chaincfg.Params
-
-	// The version of the Bitcoin protocol we use.
-	BitcoinProtocolVersion uint32
-
-	BitcoinBlocksPerRetarget uint32
-
-	BitcoinPowLimitBits uint32
-
-	// Testnet only. Ignored if set to zero.
-	BitcoinMinDiffReductionTime time.Duration
-
-	BitcoinTargetTimespanSecs      uint32
-	BitcoinMinRetargetTimespanSecs uint32
-	BitcoinMaxRetargetTimespanSecs uint32
-
-	// The maximum number of seconds in a future a Bitcoin block timestamp is allowed
-	// to be before it is rejected.
-	BitcoinMaxTstampOffsetSeconds uint64
-
-	// This value is used to determine whether or not the Bitcoin tip is up-to-date.
-	// If the Bitcoin tip's timestamp is greater than this value then a node should
-	// assume that it needs to download more Bitcoin headers from its peers before it
-	// is current.
-	BitcoinMaxTipAge time.Duration
-
-	// The time between Bitcoin blocks (=10m normally)
-	BitcoinTimeBetweenBlocks time.Duration
-
-	// When someone wants to convert BitClout to Bitcoin, they send Bitcoin to the burn address
-	// and then create a transaction on the BitClout chain referencing the burn from the
-	// Bitcoin chain. This variable is the number of blocks that must be mined on top
-	// of the initial Bitcoin burn before the corresponding BitClout transaction can be
-	// validated on the BitClout chain.
-	//
-	// Note that, in order to make validation consistent across all nodes, even nodes
-	// whose Bitcoin tip may be slightly behind, we define a very specific way of
-	// computing how much work has been done for a given Bitcoin block. We define this
-	// as follows:
-	// - Compute the first Bitcoin block that has a timestamp less than MaxTipAge.
-	//   Call this block the StalestBitcoinBlock.
-	//   * Note that any node that believes itself to be up-to-date will be able to
-	//     define a StalestBitcoinBlock that should be consistent with all other nodes
-	//     that have a roughly similar timestamp (+/- one block in edge cases due to
-	//     the timestamp being off).
-	// - Suppose we have a Bitcoin burn transaction that was mined into a block. Define
-	//   the work that has been done on this block as:
-	//   * BitcoinWork = (StalestBitcoinBlock.Height - BitcoinBurnTransactionBlockHeight)
-	//
-	// Defining the BitcoinWork in this way ensures that the following holds:
-	// - For a given Bitcoin transaction, if a particular node believes its Bitcoin tip
-	//   to be up-to-date, then the BitcoinWork it computes for that transaction will be
-	//   consistent with all other nodes that believe their Bitcoin tip to be up-to-date
-	//   (+/- one block due to the timestamps being slightly off).
-	// - Note that if a particular node does *not* believe its
-	//   Bitcoin tip to be up-to-date, it will not process any Bitcoin burn transactions
-	//   and so it does not matter that it cannot compute a value for BitcoinWork.
-	//
-	// Note that if we did not define BitcoinWork the way we do above and instead
-	// defined it relative to a particular node's Bitcoin tip, for example, then
-	// nodes could have vastly different values for BitcoinWork for the same transaction,
-	// which would cause them to disagree about which Bitcoin burn transactions
-	// are valid and which aren't.
-	//
-	// Given the above definition for BitcoinWork, miners can assure with near-certainty
-	// that a block containing a Bitcoin burn transaction will be accepted by 100% of nodes
-	// that are up-to-date as long as they ensure that all of the Bitcoin burn transactions
-	// that they mine into their block have (BitcoinWork >= BitcoinMinBurnWorkBlocks + 1). Note that
-	// nodes whose Bitcoin tip is not up-to-date will not process blocks until their tip
-	// is up-to-date, which means they will also eventually accept this block as well (and
-	// will not reject the block before they are up-to-date). Note also that using
-	// BitcoinMinBurnWorkBlocks+1 rather than BitcoinMinBurnWorkBlocks is a good idea because it protects
-	// against situations where nodes have slightly out-of-sync timestamps. In particular,
-	// any node whose timestamp is between:
-	// - (minerTstamp - minTimeBetweenBlocks) <= nodeTimestamp <= infinity
-	// - where:
-	//   * minTimeBetweenBlocks = (
-	//       StalestBitcoinBlock.TImestamp - BlockRightBeforeStalestBitcoinBlock.Timestamp)
-	//   * Note minTimeBetweenBlocks will be ~10m on average.
-	// Will believe an BitClout block containing a Bitcoin burn transaction to be valid if the
-	// Miner computes that
-	// - BitcoinWork >= BitcoinMinBurnWorkBlocks+1
-	//
-	// If the miner wants to ride the edge, she can mine transactions when
-	// BitcoinWork >= BitcoinMinBurnWorkBlocks (without hte +1 buffer). However, in this case
-	// nodes who have timesatamps within:
-	// - nodeTstamp <= minerTstamp - minTimeBetweenBlocks
-	// - where minTImeBetweenBlocks is defined as above
-	// will initially reject any BitClout blocks that contain such Bitcoin burn transactions,
-	// which puts the block at risk of not being the main chain, particularly if other
-	// miners prefer not to build on such blocks due to the risk of rejection.
-	BitcoinMinBurnWorkBlockss      int64
-	MinerBitcoinMinBurnWorkBlockss int64
 
 	// Because we use the Bitcoin header chain only to process exchanges from
 	// BTC to BitClout, we don't need to worry about Bitcoin blocks before a certain
@@ -372,6 +288,7 @@ type BitCloutParams struct {
 	MaxPostSubLengthBytes       uint64
 	MaxStakeMultipleBasisPoints uint64
 	MaxCreatorBasisPoints       uint64
+	MaxNFTRoyaltyBasisPoints    uint64
 	ParamUpdaterPublicKeys      map[PkMapKey]bool
 
 	// A list of transactions to apply when initializing the chain. Useful in
@@ -422,6 +339,29 @@ type BitCloutParams struct {
 
 	// The most deflationary event in BitClout history has yet to come...
 	DeflationBombBlockHeight uint64
+}
+
+// EnableRegtest allows for local development and testing with incredibly fast blocks with block rewards that
+// can be spent as soon as they are mined. It also removes the default testnet seeds
+func (params *BitCloutParams) EnableRegtest() {
+	if params.NetworkType != NetworkType_TESTNET {
+		glog.Error("Regtest mode can only be enabled in testnet mode")
+		return
+	}
+
+	// Clear the seeds
+	params.DNSSeeds = []string{}
+
+	// Mine blocks incredibly quickly
+	params.TimeBetweenBlocks = 2 * time.Second
+	params.TimeBetweenDifficultyRetargets = 6 * time.Second
+
+	// Allow block rewards to be spent instantly
+	params.BlockRewardMaturity = 0
+
+	// Add a key defined in n0_test to the ParamUpdater set when running in regtest mode.
+	// Seed: verb find card ship another until version devote guilt strong lemon six
+	params.ParamUpdaterPublicKeys[MakePkMapKey(MustBase58CheckDecode("tBCKVERmG9nZpHTk2AVPqknWc1Mw9HHAnqrTpW1RnXpXMQ4PsQgnmV"))] = true
 }
 
 // GenesisBlock defines the genesis block used for the BitClout maainnet and testnet
@@ -509,79 +449,8 @@ var BitCloutMainnetParams = BitCloutParams{
 	// ===================================================================================
 	// Mainnet Bitcoin config
 	// ===================================================================================
-	BitcoinDNSSeeds: []string{
-		"seed.bitcoin.sipa.be",       // Pieter Wuille, only supports x1, x5, x9, and xd
-		"dnsseed.bluematt.me",        // Matt Corallo, only supports x9
-		"dnsseed.bitcoin.dashjr.org", // Luke Dashjr
-		"seed.bitcoinstats.com",      // Christian Decker, supports x1 - xf
-		"seed.bitnodes.io",
-		"seed.bitcoin.jonasschnelli.ch", // Jonas Schnelli, only supports x1, x5, x9, and xd
-		"seed.btc.petertodd.org",        // Peter Todd, only supports x1, x5, x9, and xd
-		"seed.bitcoin.sprovoost.nl",     // Sjors Provoost
-		"dnsseed.emzy.de",               // Stephan Oeste
-	},
-	// The MinChainWork value we set below has been adjusted for the BitcoinStartBlockNode we
-	// chose. Basically it's the work to get from the start block node we set up to the
-	// current tip.
-	// Run with --v=2 and look for "CumWork" output from bitcoin_manager.go
-	BitcoinMinChainWorkHex: "000000000000000000000000000000000000000007e99d77f246db819c3dfa96",
-
-	BitcoinDefaultPort:          "8333",
-	BitcoinBtcdParams:           &chaincfg.MainNetParams,
-	BitcoinProtocolVersion:      70013,
-	BitcoinBlocksPerRetarget:    2016,
-	BitcoinPowLimitBits:         0x1d00ffff,
-	BitcoinMinDiffReductionTime: 0,
-
-	BitcoinTargetTimespanSecs:      1209600,
-	BitcoinMinRetargetTimespanSecs: 1209600 / 4,
-	BitcoinMaxRetargetTimespanSecs: 1209600 * 4,
-	// Normal Bitcoin clients set this to be 24 hours usually. The reason we diverge here
-	// is because we want to decrease the amount of time a user has to wait before BitClout
-	// nodes will be willing to process a BitcoinExchange transaction. Put another way, making
-	// this longer would require users to wait longer before their BitcoinExchange transactions
-	// are accepted, which is
-	// something we want to avoid. On the other hand, if we make this time too short
-	// (e.g. <10m as an extreme example), then we might think we're not current when in
-	// practice the problem is just that the Bitcoin blockchain took a little longer than
-	// usual to generate a block.
-	//
-	// As such, considering all of the above, the time we use here should be the shortest
-	// time that virtually guarantees that a Bitcoin block has been generated during this
-	// interval. The longest Bitcoin inter-block arrival time since 2011 was less than two
-	// hours but just to be on the safe side, we pad this value a bit and call it a day. In
-	// the worst-case if the Bitcoin chain stalls for longer than this, the BitClout chain will
-	// just pause for the same amount of time and jolt back into life once the Bitcoin chain
-	// comes back online, which is not the end of the world. In practice, we could also sever
-	// the dependence of the BitClout chain on the Bitcoin chain at some point ahead of time if we
-	// expect this will be an issue (remember BitcoinExchange transactions are really only
-	// needed to bootstrap the initial supply of BitClout).
-	//
-	// See this answer for a discussion on Bitcoin block arrival times:
-	// - https://www.reddit.com/r/Bitcoin/comments/1vkp1x/what_is_the_longest_time_between_blocks_in_the/
-	BitcoinMaxTipAge:         4 * time.Hour,
-	BitcoinTimeBetweenBlocks: 10 * time.Minute,
-	// As discussed in the original comment for this field, this is actually the minimum
-	// number of blocks a burn transaction must have between the block where it was mined
-	// and the *StalestBitcoinBlock*, not the tip (where StalestBitcoinBlock is defined
-	// in the original comment). As such, if we can presume that the StalestBitcoinBlock is
-	// is generally already defined as a block with a fair amount of work built on top of it
-	// then the value of BitcoinMinBurnWorkBlocks doesn't need to be very high (in fact we could
-	// theoretically make it zero). However, there is a good reason to make it a substantive
-	// value and that is that in situations in which the Bitcoin blockchain is producing
-	// blocks with a very high time between blocks (for example due to a bad difficulty
-	// mismatch), then the StalestBitcoinBlock could actually be pretty close to the Bitcoin
-	// tip (it could theoretically actually *be* the tip). As such, to protect ourselves in
-	// this case, we demand a solid number of blocks having been mined between the
-	// StalestBitcoinTip, which we assume isn't super reliable, and any Bitcoin burn transaction
-	// that we are mining into the BitClout chain.
-	BitcoinMinBurnWorkBlockss:      int64(1),
-	MinerBitcoinMinBurnWorkBlockss: int64(3),
-
+	BitcoinBtcdParams:  &chaincfg.MainNetParams,
 	BitcoinBurnAddress: "1PuXkbwqqwzEYo9SPGyAihAge3e9Lc71b",
-
-	// Reject Bitcoin blocks that are more than two hours in the future.
-	BitcoinMaxTstampOffsetSeconds: 2 * 60 * 60,
 
 	// We use a start node that is near the tip of the Bitcoin header chain. Doing
 	// this allows us to bootstrap Bitcoin transactions much more quickly without
@@ -695,8 +564,9 @@ var BitCloutMainnetParams = BitCloutParams{
 	MaxStakeMultipleBasisPoints: 10 * 100 * 100,
 	// 100% is the max creator percentage. Not sure why you'd buy such a coin
 	// but whatever.
-	MaxCreatorBasisPoints:  100 * 100,
-	ParamUpdaterPublicKeys: ParamUpdaterPublicKeys,
+	MaxCreatorBasisPoints:    100 * 100,
+	MaxNFTRoyaltyBasisPoints: 100 * 100,
+	ParamUpdaterPublicKeys:   ParamUpdaterPublicKeys,
 
 	// Use a canonical set of seed transactions.
 	SeedTxns: SeedTxns,
@@ -752,72 +622,19 @@ var BitCloutTestnetParams = BitCloutParams{
 	ProtocolVersion:    0,
 	MinProtocolVersion: 0,
 	UserAgent:          "Architect",
-	DNSSeeds:           []string{},
-	DNSSeedGenerators:  [][]string{},
+	DNSSeeds: []string{
+		"dorsey.bitclout.com",
+	},
+	DNSSeedGenerators: [][]string{},
 
 	// ===================================================================================
 	// Testnet Bitcoin config
 	// ===================================================================================
-	//
-	// We use the Bitcoin testnet when we use the BitClout testnet. Note there's no
-	// reason we couldn't use the Bitcoin mainnet with the BitClout testnet instead,
-	// but it seems reasonable to assume someone using the BitClout testnet would prefer
-	// the Bitcoin side be testnet as well.
-	BitcoinDNSSeeds: []string{
-		"testnet-seed.bitcoin.jonasschnelli.ch",
-		"testnet-seed.bitcoin.schildbach.de",
-		"seed.tbtc.petertodd.org",
-		"testnet-seed.bluematt.me",
-		"seed.testnet.bitcoin.sprovoost.nl",
-	},
-	// See comment in mainnet config.
-	// Below we have a ChainWork value that is much lower to accommodate testing situations.
-	//
-	//BitcoinMinChainWorkHex:      "000000000000000000000000000000000000000000000000000007d007d007d0",
-	BitcoinMinChainWorkHex:      "0000000000000000000000000000000000000000000000000000000000000000",
-	BitcoinDefaultPort:          "18333",
-	BitcoinBtcdParams:           &chaincfg.TestNet3Params,
-	BitcoinProtocolVersion:      70013,
-	BitcoinBlocksPerRetarget:    2016,
-	BitcoinPowLimitBits:         0x1d00ffff,
-	BitcoinMinDiffReductionTime: time.Minute * 20,
-
-	BitcoinTargetTimespanSecs:      1209600,
-	BitcoinMinRetargetTimespanSecs: 1209600 / 4,
-	BitcoinMaxRetargetTimespanSecs: 1209600 * 4,
-
-	// See commentary on these values in the Mainnet config above and in the struct
-	// definition (also above).
-	//
-	// Below are some alternative settings for BitcoinMaxTipAge that are useful
-	// for testing. They make it so that the chain becomes current really fast,
-	// meaning things that block until the Bitcoin chain is current can be tested
-	// more easily.
-	//
-	// Super quick age (does one header download before becoming current)
-	//BitcoinMaxTipAge: 65388 * time.Hour,
-	// Medium quick age (does a few header downloads before becoming current)
-	//BitcoinMaxTipAge: 64888 * time.Hour,
-	// TODO: Change back to 3 hours when we launch the testnet. In the meantime this value
-	// is more useful for local testing.
-	//BitcoinMaxTipAge:              3 * time.Hour,
-	// NOTE: This must be set to a very low value if you want Bitcoin burn transactions
-	// to get considered more quickly.
-	BitcoinMaxTipAge:         4 * time.Hour,
-	BitcoinTimeBetweenBlocks: 10 * time.Minute,
-	// TODO: Change back to 6 blocks when we launch the testnet. In the meantime this value
-	// is more useful for local testing.
-	//BitcoinMinBurnWorkBlocks:      6, // = 60min / 10min per block
-	BitcoinMinBurnWorkBlockss:      int64(1),
-	MinerBitcoinMinBurnWorkBlockss: int64(3),
-
+	BitcoinBtcdParams:               &chaincfg.TestNet3Params,
 	BitcoinBurnAddress:              "mhziDsPWSMwUqvZkVdKY92CjesziGP3wHL",
 	BitcoinExchangeFeeBasisPoints:   10,
 	BitcoinDoubleSpendWaitSeconds:   5.0,
 	BitCloutNanosPurchasedAtGenesis: uint64(6000000000000000),
-
-	// Reject Bitcoin blocks that are more than two hours in the future.
-	BitcoinMaxTstampOffsetSeconds: 2 * 60 * 60,
 
 	// See comment in mainnet config.
 	BitcoinStartBlockNode: NewBlockNode(
@@ -849,10 +666,10 @@ var BitCloutTestnetParams = BitCloutParams{
 	GenesisBlock:        &GenesisBlock,
 	GenesisBlockHashHex: GenesisBlockHashHex,
 
-	// Use a very fast block time in the testnet.
-	TimeBetweenBlocks: 2 * time.Second,
+	// Use a faster block time in the testnet.
+	TimeBetweenBlocks: 1 * time.Minute,
 	// Use a very short difficulty retarget period in the testnet.
-	TimeBetweenDifficultyRetargets: 6 * time.Second,
+	TimeBetweenDifficultyRetargets: 3 * time.Minute,
 	// This is used as the starting difficulty for the chain.
 	MinDifficultyTargetHex: "0090000000000000000000000000000000000000000000000000000000000000",
 	// Minimum amount of work a valid chain needs to have. Useful for preventing
@@ -868,9 +685,7 @@ var BitCloutTestnetParams = BitCloutParams{
 	// to above 200% of its previous value.
 	MaxDifficultyRetargetFactor: 2,
 	// Miners need to wait some time before spending their block reward.
-	// TODO: Make this 24 hours when we launch the testnet. In the meantime this value
-	// is more useful for local testing.
-	BlockRewardMaturity: 0,
+	BlockRewardMaturity: 5 * time.Minute,
 
 	V1DifficultyAdjustmentFactor: 10,
 
@@ -915,14 +730,16 @@ var BitCloutTestnetParams = BitCloutParams{
 	MaxStakeMultipleBasisPoints: 10 * 100 * 100,
 	// 100% is the max creator percentage. Not sure why you'd buy such a coin
 	// but whatever.
-	MaxCreatorBasisPoints:  100 * 100,
-	ParamUpdaterPublicKeys: ParamUpdaterPublicKeys,
+	MaxCreatorBasisPoints:    100 * 100,
+	MaxNFTRoyaltyBasisPoints: 100 * 100,
+	ParamUpdaterPublicKeys:   ParamUpdaterPublicKeys,
 
 	// Use a canonical set of seed transactions.
 	SeedTxns: TestSeedTxns,
 
 	// Set some seed balances if desired
-	SeedBalances: TestSeedBalances,
+	// Note: For now these must be the same as mainnet because GenesisBlock is the same
+	SeedBalances: SeedBalances,
 
 	// Just charge one basis point on creator coin trades for now.
 	CreatorCoinTradeFeeBasisPoints: 1,
@@ -959,13 +776,18 @@ const (
 	IsQuotedRecloutKey = "IsQuotedReclout"
 
 	// Keys for a GlobalParamUpdate transaction's extra data map.
-	USDCentsPerBitcoin            = "USDCentsPerBitcoin"
-	MinNetworkFeeNanosPerKB       = "MinNetworkFeeNanosPerKB"
-	CreateProfileFeeNanos         = "CreateProfileFeeNanos"
-	ForbiddenBlockSignaturePubKey = "ForbiddenBlockSignaturePubKey"
+	USDCentsPerBitcoinKey            = "USDCentsPerBitcoin"
+	MinNetworkFeeNanosPerKBKey       = "MinNetworkFeeNanosPerKB"
+	CreateProfileFeeNanosKey         = "CreateProfileFeeNanos"
+	CreateNFTFeeNanosKey             = "CreateNFTFeeNanos"
+	MaxCopiesPerNFTKey               = "MaxCopiesPerNFT"
+	ForbiddenBlockSignaturePubKeyKey = "ForbiddenBlockSignaturePubKey"
 
 	DiamondLevelKey    = "DiamondLevel"
 	DiamondPostHashKey = "DiamondPostHash"
+
+	// Key in transaction's extra data map containing the derived key used in signing the txn.
+	DerivedPublicKey = "DerivedPublicKey"
 )
 
 // Defines values that may exist in a transaction's ExtraData map
@@ -992,6 +814,9 @@ var (
 		MinimumNetworkFeeNanosPerKB: 0,
 		// We initialize the CreateProfileFeeNanos to 0 so we do not assess a fee to create a profile until specified by ParamUpdater.
 		CreateProfileFeeNanos: 0,
+		// We initialize the CreateNFTFeeNanos to 0 so we do not assess a fee to create an NFT until specified by ParamUpdater.
+		CreateNFTFeeNanos: 0,
+		MaxCopiesPerNFT:   0,
 	}
 )
 
@@ -1005,4 +830,10 @@ const (
 	MinCreateProfileFeeNanos = 0
 	// MaxCreateProfileFeeNanos - Maximum value to which the create profile fee can be set.
 	MaxCreateProfileFeeNanos = 100 * NanosPerUnit
+	// Min/MaxCreateNFTFeeNanos - Min/max value to which the create NFT fee can be set.
+	MinCreateNFTFeeNanos = 0
+	MaxCreateNFTFeeNanos = 100 * NanosPerUnit
+	// Min/MaxMaxCopiesPerNFTNanos - Min/max value to which the create NFT fee can be set.
+	MinMaxCopiesPerNFT = 1
+	MaxMaxCopiesPerNFT = 10000
 )

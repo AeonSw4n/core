@@ -244,7 +244,7 @@ func NewTestMiner(t *testing.T, chain *Blockchain, params *BitCloutParams, isSen
 		0, 1,
 		blockSignerSeed,
 		mempool, chain,
-		nil, params)
+		params, nil)
 	require.NoError(err)
 
 	newMiner, err := NewBitCloutMiner(minerPubKeys, 1 /*numThreads*/, blockProducer, params)
@@ -263,7 +263,38 @@ func _getBalance(t *testing.T, chain *Blockchain, mempool *BitCloutMempool, pkSt
 	for _, utxoEntry := range utxoEntriesFound {
 		balanceForUserNanos += utxoEntry.AmountNanos
 	}
+
+	utxoView, err := NewUtxoView(chain.db, chain.params, nil)
+	require.NoError(t, err)
+	if mempool != nil {
+		utxoView, err = mempool.GetAugmentedUniversalView()
+		require.NoError(t, err)
+	}
+
+	balanceNanos, err := utxoView.GetSpendableBitcloutBalanceNanosForPublicKey(
+		pkBytes, chain.headerTip().Height)
+	require.NoError(t, err)
+
+	// DO NOT REMOVE: This is used to test the similarity of UTXOs vs. the pubkey balance index.
+	require.Equal(t, balanceForUserNanos, balanceNanos)
+
 	return balanceForUserNanos
+}
+
+func _getCreatorCoinInfo(t *testing.T, db *badger.DB, params *BitCloutParams, pkStr string,
+) (_bitCloutLocked uint64, _coinsInCirculation uint64) {
+	pkBytes, _, err := Base58CheckDecode(pkStr)
+	require.NoError(t, err)
+
+	utxoView, _ := NewUtxoView(db, params, nil)
+
+	// Profile fields
+	creatorProfile := utxoView.GetProfileEntryForPublicKey(pkBytes)
+	if creatorProfile == nil {
+		return 0, 0
+	}
+
+	return creatorProfile.BitCloutLockedNanos, creatorProfile.CoinsInCirculationNanos
 }
 
 func _getBalanceWithView(t *testing.T, utxoView *UtxoView, pkStr string) uint64 {
@@ -476,7 +507,7 @@ func TestSeedBalancesTest(t *testing.T) {
 
 	chain, params, db := NewTestBlockchain()
 	for _, seedBalance := range params.SeedBalances {
-		require.Equal(int64(1), int64(GetUtxoNumEntries(db)))
+		require.Equal(int64(482), int64(GetUtxoNumEntries(db)))
 		foundUtxos, err := chain.GetSpendableUtxosForPublicKey(seedBalance.PublicKey, nil, nil)
 		require.NoError(err)
 		require.Equal(int64(1), int64(len(foundUtxos)))
@@ -710,9 +741,26 @@ func _signTxn(t *testing.T, txn *MsgBitCloutTxn, privKeyStrArg string) {
 	privKeyBytes, _, err := Base58CheckDecode(privKeyStrArg)
 	require.NoError(err)
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privKeyBytes)
-	require.NoError(err)
 	txnSignature, err := txn.Sign(privKey)
 	require.NoError(err)
+	txn.Signature = txnSignature
+}
+
+// Signs the transaction with a derived key. Transaction ExtraData contains the derived
+// public key, so that _verifySignature() knows transaction wasn't signed by the owner.
+func _signTxnWithDerivedKey(t *testing.T, txn *MsgBitCloutTxn, privKeyStrArg string) {
+	require := require.New(t)
+
+	privKeyBytes, _, err := Base58CheckDecode(privKeyStrArg)
+	require.NoError(err)
+	privateKey, publicKey := btcec.PrivKeyFromBytes(btcec.S256(), privKeyBytes)
+	if txn.ExtraData == nil {
+		txn.ExtraData = make(map[string][]byte)
+	}
+	txn.ExtraData[DerivedPublicKey] = publicKey.SerializeCompressed()
+	txnSignature, err := txn.Sign(privateKey)
+	require.NoError(err)
+
 	txn.Signature = txnSignature
 }
 
@@ -902,8 +950,7 @@ func TestValidateBasicTransfer(t *testing.T) {
 		txn := _assembleBasicTransferTxnFullySigned(t, chain, spendAmount, feeRateNanosPerKB,
 			senderPkString, recipientPkString, senderPrivString, nil)
 		err := chain.ValidateTransaction(txn, chain.blockTip().Height+1,
-			true /*verifySignatures*/, false, /*checkMerkleProof*/
-			0, nil)
+			true /*verifySignatures*/, nil)
 		require.NoError(err)
 	}
 
@@ -925,10 +972,7 @@ func TestValidateBasicTransfer(t *testing.T) {
 			_signTxn(t, txn, senderPrivString)
 		}
 
-		err := chain.ValidateTransaction(txn, chain.blockTip().Height+1,
-			true,  /*verifySignatures*/
-			false, /*checkMerkleProof*/
-			0, nil)
+		err := chain.ValidateTransaction(txn, chain.blockTip().Height+1, true, nil)
 		require.Error(err)
 		require.Contains(err.Error(), RuleErrorTxnOutputExceedsInput)
 	}
@@ -949,10 +993,7 @@ func TestValidateBasicTransfer(t *testing.T) {
 		})
 		// Re-sign the transaction.
 		_signTxn(t, txn, senderPrivString)
-		err := chain.ValidateTransaction(txn, chain.blockTip().Height+1,
-			true,  /*verifySignatures*/
-			false, /*checkMerkleProof*/
-			0, nil)
+		err := chain.ValidateTransaction(txn, chain.blockTip().Height+1, true, nil)
 		require.Error(err)
 		require.Contains(err.Error(), RuleErrorInputSpendsImmatureBlockReward)
 	}
@@ -1495,7 +1536,7 @@ func TestForbiddenBlockSignaturePubKey(t *testing.T) {
 	blockSignerPkBytes, _, err := Base58CheckDecode(blockSignerPk)
 	require.NoError(err)
 	txn, _, _, _, err := chain.CreateUpdateGlobalParamsTxn(
-		senderPkBytes, -1, -1, -1, blockSignerPkBytes, 100 /*feeRateNanosPerKB*/, nil)
+		senderPkBytes, -1, -1, -1, -1, -1, blockSignerPkBytes, 100 /*feeRateNanosPerKB*/, nil)
 	require.NoError(err)
 
 	// Mine a few blocks to give the senderPkString some money.

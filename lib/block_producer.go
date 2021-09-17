@@ -6,6 +6,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/tyler-smith/go-bip39"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
@@ -38,10 +39,14 @@ type BitCloutBlockProducer struct {
 
 	latestBlockTemplateStats *BlockTemplateStats
 
-	mempool        *BitCloutMempool
-	chain          *Blockchain
-	bitcoinManager *BitcoinManager
-	params         *BitCloutParams
+	mempool *BitCloutMempool
+	chain   *Blockchain
+	params  *BitCloutParams
+
+	producerWaitGroup   sync.WaitGroup
+	stopProducerChannel chan struct{}
+
+	postgres *Postgres
 }
 
 type BlockTemplateStats struct {
@@ -59,19 +64,23 @@ type BlockTemplateStats struct {
 }
 
 func NewBitCloutBlockProducer(
-	_minBlockUpdateIntervalSeconds uint64, _maxBlockTemplatesToCache uint64,
-	_blockProducerSeed string,
-	_mempool *BitCloutMempool, _chain *Blockchain, _bitcoinManager *BitcoinManager,
-	_params *BitCloutParams) (*BitCloutBlockProducer, error) {
+	minBlockUpdateIntervalSeconds uint64,
+	maxBlockTemplatesToCache uint64,
+	blockProducerSeed string,
+	mempool *BitCloutMempool,
+	chain *Blockchain,
+	params *BitCloutParams,
+	postgres *Postgres,
+) (*BitCloutBlockProducer, error) {
 
-	var _privKey *btcec.PrivateKey
-	if _blockProducerSeed != "" {
-		seedBytes, err := bip39.NewSeedWithErrorChecking(_blockProducerSeed, "")
+	var privKey *btcec.PrivateKey
+	if blockProducerSeed != "" {
+		seedBytes, err := bip39.NewSeedWithErrorChecking(blockProducerSeed, "")
 		if err != nil {
 			return nil, fmt.Errorf("NewBitCloutBlockProducer: Error converting mnemonic: %+v", err)
 		}
 
-		_, _privKey, _, err = ComputeKeysFromSeed(seedBytes, 0, _params)
+		_, privKey, _, err = ComputeKeysFromSeed(seedBytes, 0, params)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"NewBitCloutBlockProducer: Error computing keys from seed: %+v", err)
@@ -79,15 +88,16 @@ func NewBitCloutBlockProducer(
 	}
 
 	return &BitCloutBlockProducer{
-		minBlockUpdateIntervalSeconds: _minBlockUpdateIntervalSeconds,
-		maxBlockTemplatesToCache:      _maxBlockTemplatesToCache,
-		blockProducerPrivateKey: _privKey,
+		minBlockUpdateIntervalSeconds: minBlockUpdateIntervalSeconds,
+		maxBlockTemplatesToCache:      maxBlockTemplatesToCache,
+		blockProducerPrivateKey:       privKey,
 		recentBlockTemplatesProduced:  make(map[BlockHash]*MsgBitCloutBlock),
 
-		mempool:        _mempool,
-		chain:          _chain,
-		bitcoinManager: _bitcoinManager,
-		params:         _params,
+		mempool:             mempool,
+		chain:               chain,
+		params:              params,
+		stopProducerChannel: make(chan struct{}),
+		postgres:            postgres,
 	}, nil
 }
 
@@ -188,8 +198,7 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 		currentBlockSize := uint64(len(blockBytes) + MaxVarintLen64)
 
 		// Create a new view object.
-		utxoView, err := NewUtxoView(
-			bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.bitcoinManager)
+		utxoView, err := NewUtxoView(bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.postgres)
 		if err != nil {
 			return nil, nil, nil, errors.Wrapf(err,
 				"BitCloutBlockProducer._getBlockTemplate: Error generating checker UtxoView: ")
@@ -205,8 +214,6 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 			// Try to apply the transaction to the view with the strictest possible checks.
 			_, _, _, _, err := utxoView._connectTransaction(
 				mempoolTx.Tx, mempoolTx.Hash, int64(mempoolTx.TxSizeBytes), uint32(blockRet.Header.Height), true,
-				true, /*checkMerkleProof*/
-				bitcloutBlockProducer.params.MinerBitcoinMinBurnWorkBlockss,
 				false /*ignoreUtxos*/)
 			if err != nil {
 				// If we fail to apply this transaction then we're done. Don't mine any of the
@@ -217,9 +224,8 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 				if mempoolTx.Tx.TxnMeta.GetTxnType() == TxnTypeBitcoinExchange {
 					// Print the Bitcoin block hash when we break out due to this.
 					btcErrorString := fmt.Sprintf("A bad BitcoinExchange transaction may be holding "+
-						"up block production: %v, Current header tip: %v",
-						mempoolTx.Tx.TxnMeta.(*BitcoinExchangeMetadata).BitcoinTransaction.TxHash(),
-						bitcloutBlockProducer.bitcoinManager.HeaderTip().Hash)
+						"up block production: %v",
+						mempoolTx.Tx.TxnMeta.(*BitcoinExchangeMetadata).BitcoinTransaction.TxHash())
 					glog.Infof(btcErrorString)
 					txnErrorString += (" " + btcErrorString)
 					scs := spew.ConfigState{DisableMethods: true, Indent: "  "}
@@ -277,7 +283,7 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 
 	// Compute the total fee the BlockProducer should get.
 	totalFeeNanos := uint64(0)
-	feesUtxoView, err := NewUtxoView(bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.bitcoinManager)
+	feesUtxoView, err := NewUtxoView(bitcloutBlockProducer.chain.db, bitcloutBlockProducer.params, bitcloutBlockProducer.postgres)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf(
 			"BitCloutBlockProducer._getBlockTemplate: Error generating UtxoView to compute txn fees: %v", err)
@@ -287,8 +293,7 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 		var feeNanos uint64
 		_, _, _, feeNanos, err = feesUtxoView._connectTransaction(
 			txnInBlock, txnInBlock.Hash(), 0, uint32(blockRet.Header.Height), false, /*verifySignatures*/
-			false, /*checkMerkleProof*/
-			0, false /*ignoreUtxos*/)
+			false /*ignoreUtxos*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf(
 				"BitCloutBlockProducer._getBlockTemplate: Error attaching txn to UtxoView for computed block: %v", err)
@@ -325,6 +330,8 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) _getBlockTemplate(publicKey 
 }
 
 func (bitcloutBlockProducer *BitCloutBlockProducer) Stop() {
+	bitcloutBlockProducer.stopProducerChannel <- struct{}{}
+	bitcloutBlockProducer.producerWaitGroup.Wait()
 }
 
 func (bitcloutBlockProducer *BitCloutBlockProducer) GetRecentBlock(blockHash *BlockHash) *MsgBitCloutBlock {
@@ -520,44 +527,36 @@ func (bitcloutBlockProducer *BitCloutBlockProducer) SignBlock(blockFound *MsgBit
 }
 
 func (bitcloutBlockProducer *BitCloutBlockProducer) Start() {
-
-	for {
-		// If we have a bitcoinManager set, wait for it to become time-current before
-		// producing blocks. We don't wait for it to become work-current because worst-case
-		// the BitcoinManager will reset its underlying chain, causing us to produce
-		// stale blocks for a bit.
-		if bitcloutBlockProducer.bitcoinManager != nil && !bitcloutBlockProducer.bitcoinManager.IsCurrent(false /*considerCumWork*/) {
-			glog.Info("Waiting for BitcoinManager to become time-current before producing blocks...")
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		glog.Info("BitcoinManager is time-current; proceeding with producing blocks!")
-		break
-	}
-
 	// Set the time to a nil value so we run on the first iteration of the loop.
 	var lastBlockUpdate time.Time
+	bitcloutBlockProducer.producerWaitGroup.Add(1)
 
 	for {
-		secondsLeft := float64(bitcloutBlockProducer.minBlockUpdateIntervalSeconds) - time.Since(lastBlockUpdate).Seconds()
-		if !lastBlockUpdate.IsZero() && secondsLeft > 0 {
-			glog.Debugf("Sleeping for %v seconds before producing next block template...", secondsLeft)
-			time.Sleep(time.Duration(math.Ceil(secondsLeft)) * time.Second)
-			continue
-		}
+		select {
+		case <-bitcloutBlockProducer.stopProducerChannel:
+			bitcloutBlockProducer.producerWaitGroup.Done()
+			return
+		default:
+			secondsLeft := float64(bitcloutBlockProducer.minBlockUpdateIntervalSeconds) - time.Since(lastBlockUpdate).Seconds()
+			if !lastBlockUpdate.IsZero() && secondsLeft > 0 {
+				glog.Debugf("Sleeping for %v seconds before producing next block template...", secondsLeft)
+				time.Sleep(time.Duration(math.Ceil(secondsLeft)) * time.Second)
+				continue
+			}
 
-		// Update the time so start the clock for the next iteration.
-		lastBlockUpdate = time.Now()
+			// Update the time so start the clock for the next iteration.
+			lastBlockUpdate = time.Now()
 
-		glog.Debugf("Producing block template...")
-		err := bitcloutBlockProducer.UpdateLatestBlockTemplate()
-		if err != nil {
-			// If we hit an error, log it and sleep for a second. This could happen due to us
-			// being in the middle of processing a block or something.
-			glog.Errorf("Error producing block template: %v", err)
-			time.Sleep(time.Second)
-			continue
+			glog.Debugf("Producing block template...")
+			err := bitcloutBlockProducer.UpdateLatestBlockTemplate()
+			if err != nil {
+				// If we hit an error, log it and sleep for a second. This could happen due to us
+				// being in the middle of processing a block or something.
+				glog.Errorf("Error producing block template: %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
+
 		}
 	}
 }

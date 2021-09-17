@@ -13,8 +13,8 @@ import (
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the node",
-	Long: `...`,
-	Run: Run,
+	Long:  `...`,
+	Run:   Run,
 }
 
 func init() {
@@ -56,6 +56,12 @@ func SetupRunFlags(cmd *cobra.Command) {
 			"ids to transaction information. This enables the use of certain API calls "+
 			"like ones that allow the lookup of particular transactions by their ID. "+
 			"Defaults to false because the index can be large.")
+	cmd.PersistentFlags().Bool("regtest", false,
+		"Can only be used in conjunction with --testnet. Creates a private testnet node with fast block times"+
+			"and instantly spendable block rewards.")
+	cmd.PersistentFlags().String("postgres-uri", "", "BETA: Use Postgres as the backing store for chain data."+
+		"When enabled, most data is stored in postgres although badger is still currently used for some state. Run your "+
+		"Postgres instance on the same machine as your node for optimal performance.")
 
 	// Peers
 	cmd.PersistentFlags().StringSlice("connect-ips", []string{},
@@ -75,9 +81,6 @@ func SetupRunFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().Uint64("stall-timeout-seconds", 900,
 		"How long the node will wait for a peer to reply to certain types of requests. "+
 			"We make this gratuitous just in case the node we're connecting to is backed up.")
-	cmd.PersistentFlags().String("bitcoin-connect-peer", "",
-		"When set to an IP:PORT, the BitcoinManager will use this peer to source Bitcoin "+
-			"headers and won't talk to anyone else. When unset, a random Bitcoin peer is chosen.")
 
 	// Peer Restrictions
 	cmd.PersistentFlags().Bool("private-mode", false, "The node does not look up addresses from DNS seeds.")
@@ -87,11 +90,6 @@ func SetupRunFlags(cmd *cobra.Command) {
 		"When set to true, the node will ignore all INV messages unless they come from an outbound peer. "+
 			"This is useful when setting up a node that you want to have a direct and 1:1 relationship with "+
 			"another node, as is common when setting up read sharding.")
-	cmd.PersistentFlags().Bool("ignore-unmined-bitcoin", false,
-		"When set to true, unmined BitcoinExchange transactions from peers are disregarded. This is OK "+
-			"because we will eventually reprocess this transaction once it gets mined into a block, although anything "+
-			"that is built on top of it may not be considered. It's set to false by default because most nodes "+
-			"connect to trusted peers right now via --connect-ips and --ignore-inbound-peer-inv-messages.")
 	cmd.PersistentFlags().Uint64("max-inbound-peers", 125, "The maximum number of inbound peers a node can have.")
 	cmd.PersistentFlags().Bool("one-inbound-per-ip", true,
 		"When set, the node will not allow more than one connection to/from a particular "+
@@ -144,28 +142,28 @@ func SetupRunFlags(cmd *cobra.Command) {
 		"When specified, this key is used to power the BitcoinExchange flow "+
 			"and to check for double-spends in the mempool")
 	cmd.PersistentFlags().String("block-producer-seed", "",
-		"When set, all blocks produced by the block producer will be signed by this " +
+		"When set, all blocks produced by the block producer will be signed by this "+
 			"seed.")
 	cmd.PersistentFlags().StringSlice("trusted-block-producer-public-keys", []string{
 		"BC1YLgS1zDJQqywFpsty4fFheUrZxVQNKEsrttppvUESFZCq6Nfoypm",
-			"BC1YLh768bVj2R3QpSiduxcvn7ipxF3L3XHsabZYtCGtsinUnNrZvNN",
-			"BC1YLgsiUgM1Vr35YwbkSfZB3NC9tyrMXBPuJ2SEBf8naDf6PRpNit9",
-			"BC1YLgW5jWudzSUvrvNkD4GReN3kvGvsTuqLLttKfsCbXb7vLSCjwTk",
-			"BC1YLi8X7U9DZc2UqPE4s5PjrNJJUa6PKygD7VF4u8vy96srm18YvEX",
+		"BC1YLh768bVj2R3QpSiduxcvn7ipxF3L3XHsabZYtCGtsinUnNrZvNN",
+		"BC1YLgsiUgM1Vr35YwbkSfZB3NC9tyrMXBPuJ2SEBf8naDf6PRpNit9",
+		"BC1YLgW5jWudzSUvrvNkD4GReN3kvGvsTuqLLttKfsCbXb7vLSCjwTk",
+		"BC1YLi8X7U9DZc2UqPE4s5PjrNJJUa6PKygD7VF4u8vy96srm18YvEX",
 	},
-		"When set, this node will only accept new blocks that are signed by the trusted block " +
-			"producers. This setting, is pretty novel. It allows a network of full nodes who " +
-			"trust each other to create their own network that can't be easily taken over by a 51% " +
-			"attack. In some sense, it uses trust in order to lower the amount of work needed to " +
-			"protect the network, making it highly eco-friendly. Then, if full nodes ever want to " +
-			"allow open mining, all they need to do is unset these public keys (or one of the owners " +
-			"of the public keys can release her key material, pulling a metaphorical 'ripcord'). " +
-			"Importantly, until this point, the network will be completely protected from a 51% attack, " +
+		"When set, this node will only accept new blocks that are signed by the trusted block "+
+			"producers. This setting, is pretty novel. It allows a network of full nodes who "+
+			"trust each other to create their own network that can't be easily taken over by a 51% "+
+			"attack. In some sense, it uses trust in order to lower the amount of work needed to "+
+			"protect the network, making it highly eco-friendly. Then, if full nodes ever want to "+
+			"allow open mining, all they need to do is unset these public keys (or one of the owners "+
+			"of the public keys can release her key material, pulling a metaphorical 'ripcord'). "+
+			"Importantly, until this point, the network will be completely protected from a 51% attack, "+
 			"giving it time to accumulate the necessary hash power.")
 	cmd.PersistentFlags().Uint64("trusted-block-producer-start-height", 37000,
-		"If --trusted-block-producer-public-keys is set, then all blocks after this height must " +
-			"be signed by one of these keys in order to be considered valid. Setting this value to zero " +
-			"enforces that all blocks after genesis must be signed by a trusted block producer. The default " +
+		"If --trusted-block-producer-public-keys is set, then all blocks after this height must "+
+			"be signed by one of these keys in order to be considered valid. Setting this value to zero "+
+			"enforces that all blocks after genesis must be signed by a trusted block producer. The default "+
 			"value was chosen to be in-line with the default trusted public keys chosen.")
 
 	// Logging
