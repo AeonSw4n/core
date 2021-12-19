@@ -488,11 +488,11 @@ var DeSoMainnetParams = DeSoParams{
 		StatusBitcoinHeaderValidated,
 	),
 
-	BitcoinExchangeFeeBasisPoints:   10,
-	BitcoinDoubleSpendWaitSeconds:   5.0,
-	DeSoNanosPurchasedAtGenesis: uint64(6000000000000000),
-	DefaultSocketPort:               uint16(17000),
-	DefaultJSONPort:                 uint16(17001),
+	BitcoinExchangeFeeBasisPoints: 10,
+	BitcoinDoubleSpendWaitSeconds: 5.0,
+	DeSoNanosPurchasedAtGenesis:   uint64(6000000000000000),
+	DefaultSocketPort:             uint16(17000),
+	DefaultJSONPort:               uint16(17001),
 
 	DialTimeout:               30 * time.Second,
 	VersionNegotiationTimeout: 30 * time.Second,
@@ -630,11 +630,11 @@ var DeSoTestnetParams = DeSoParams{
 	// ===================================================================================
 	// Testnet Bitcoin config
 	// ===================================================================================
-	BitcoinBtcdParams:               &chaincfg.TestNet3Params,
-	BitcoinBurnAddress:              "mhziDsPWSMwUqvZkVdKY92CjesziGP3wHL",
-	BitcoinExchangeFeeBasisPoints:   10,
-	BitcoinDoubleSpendWaitSeconds:   5.0,
-	DeSoNanosPurchasedAtGenesis: uint64(6000000000000000),
+	BitcoinBtcdParams:             &chaincfg.TestNet3Params,
+	BitcoinBurnAddress:            "mhziDsPWSMwUqvZkVdKY92CjesziGP3wHL",
+	BitcoinExchangeFeeBasisPoints: 10,
+	BitcoinDoubleSpendWaitSeconds: 5.0,
+	DeSoNanosPurchasedAtGenesis:   uint64(6000000000000000),
 
 	// See comment in mainnet config.
 	BitcoinStartBlockNode: NewBlockNode(
@@ -699,7 +699,7 @@ var DeSoTestnetParams = DeSoParams{
 	// We set this to be lower initially to avoid winding up with really big
 	// spam blocks in the event someone tries to abuse the initially low min
 	// fee rates.
-	MinerMaxBlockSizeBytes: 200000,
+	MinerMaxBlockSizeBytes: 1000000,
 
 	Base58PrefixPublicKey:  [3]byte{0x11, 0xc2, 0x0},
 	Base58PrefixPrivateKey: [3]byte{0x4f, 0x6, 0x1b},
@@ -798,13 +798,6 @@ var (
 var (
 	QuotedRepostVal    = []byte{1}
 	NotQuotedRepostVal = []byte{0}
-)
-
-var (
-	IsGraylisted   = []byte{1}
-	IsBlacklisted  = []byte{1}
-	NotGraylisted  = []byte{0}
-	NotBlacklisted = []byte{0}
 )
 
 // InitialGlobalParamsEntry to be used before ParamUpdater creates the first update.
