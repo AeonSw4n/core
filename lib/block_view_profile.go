@@ -447,12 +447,19 @@ func (bav *UtxoView) setProfileMappings(profile *PGProfile) (*ProfileEntry, *PKI
 			Username:    []byte(profile.Username),
 			Description: []byte(profile.Description),
 			ProfilePic:  profile.ProfilePic,
-			CoinEntry: CoinEntry{
+			CreatorCoinEntry: CoinEntry{
 				CreatorBasisPoints:      profile.CreatorBasisPoints,
 				DeSoLockedNanos:         profile.DeSoLockedNanos,
 				NumberOfHolders:         profile.NumberOfHolders,
 				CoinsInCirculationNanos: profile.CoinsInCirculationNanos,
 				CoinWatermarkNanos:      profile.CoinWatermarkNanos,
+				MintingDisabled:         profile.MintingDisabled,
+			},
+			DAOCoinEntry: CoinEntry{
+				NumberOfHolders:           profile.DAOCoinNumberOfHolders,
+				CoinsInCirculationNanos:   profile.DAOCoinCoinsInCirculationNanos,
+				MintingDisabled:           profile.DAOCoinMintingDisabled,
+				TransferRestrictionStatus: profile.DAOCoinTransferRestrictionStatus,
 			},
 		}
 
@@ -496,7 +503,7 @@ func (bav *UtxoView) GetProfilesForUsernamePrefixByCoinValue(usernamePrefix stri
 
 	// Username searches are always sorted by coin value.
 	sort.Slice(profileEntrys, func(ii, jj int) bool {
-		return profileEntrys[ii].CoinEntry.DeSoLockedNanos > profileEntrys[jj].CoinEntry.DeSoLockedNanos
+		return profileEntrys[ii].CreatorCoinEntry.DeSoLockedNanos > profileEntrys[jj].CreatorCoinEntry.DeSoLockedNanos
 	})
 
 	return profileEntrys
@@ -559,7 +566,7 @@ func (bav *UtxoView) _connectUpdateProfile(
 		}
 		profilePublicKey = txMeta.ProfilePublicKey
 
-		if blockHeight > UpdateProfileFixBlockHeight {
+		if blockHeight > bav.Params.ForkHeights.UpdateProfileFixBlockHeight {
 			// Make sure that either (1) the profile pub key is the txn signer's  public key or
 			// (2) the signer is a param updater
 			if !reflect.DeepEqual(txn.PublicKey, txMeta.ProfilePublicKey) && !updaterIsParamUpdater {
@@ -622,7 +629,7 @@ func (bav *UtxoView) _connectUpdateProfile(
 	// Save a copy of the profile entry so so that we can safely modify it.
 	var prevProfileEntry *ProfileEntry
 	if existingProfileEntry != nil {
-		// NOTE: The only pointer in here is the StakeEntry and CoinEntry pointer, but since
+		// NOTE: The only pointer in here is the StakeEntry and CreatorCoinEntry pointer, but since
 		// this is not modified below we don't need to make a copy of it.
 		prevProfileEntry = &ProfileEntry{}
 		*prevProfileEntry = *existingProfileEntry
@@ -669,7 +676,7 @@ func (bav *UtxoView) _connectUpdateProfile(
 		newProfileEntry.IsHidden = txMeta.IsHidden
 
 		// Just always set the creator basis points and stake multiple.
-		newProfileEntry.CreatorBasisPoints = txMeta.NewCreatorBasisPoints
+		newProfileEntry.CreatorCoinEntry.CreatorBasisPoints = txMeta.NewCreatorBasisPoints
 
 		// The StakeEntry is always left unmodified here.
 
@@ -691,7 +698,7 @@ func (bav *UtxoView) _connectUpdateProfile(
 		// If below block height, use transaction public key.
 		// If above block height, use ProfilePublicKey if available.
 		profileEntryPublicKey := txn.PublicKey
-		if blockHeight > ParamUpdaterProfileUpdateFixBlockHeight {
+		if blockHeight > bav.Params.ForkHeights.ParamUpdaterProfileUpdateFixBlockHeight {
 			profileEntryPublicKey = profilePublicKey
 		} else if !reflect.DeepEqual(txn.PublicKey, txMeta.ProfilePublicKey) {
 			// In this case a clobbering will occur if there was a pre-existing profile
@@ -704,7 +711,7 @@ func (bav *UtxoView) _connectUpdateProfile(
 			// Save the amount of DESO locked in the profile since this is going to
 			// be clobbered.
 			if clobberedProfileEntry != nil && !clobberedProfileEntry.isDeleted {
-				clobberedProfileBugDeSoAdjustment = clobberedProfileEntry.CoinEntry.DeSoLockedNanos
+				clobberedProfileBugDeSoAdjustment = clobberedProfileEntry.CreatorCoinEntry.DeSoLockedNanos
 			}
 		}
 
@@ -714,7 +721,7 @@ func (bav *UtxoView) _connectUpdateProfile(
 			Description: txMeta.NewDescription,
 			ProfilePic:  txMeta.NewProfilePic,
 
-			CoinEntry: CoinEntry{
+			CreatorCoinEntry: CoinEntry{
 				CreatorBasisPoints: txMeta.NewCreatorBasisPoints,
 
 				// The other coin fields are automatically set to zero, which is an
@@ -875,11 +882,11 @@ func (bav *UtxoView) _connectSwapIdentity(
 	// swapping the balances of total deso locked. If no profile exists, from/to is zero.
 	fromNanos := uint64(0)
 	if fromProfileEntry != nil {
-		fromNanos = fromProfileEntry.CoinEntry.DeSoLockedNanos
+		fromNanos = fromProfileEntry.CreatorCoinEntry.DeSoLockedNanos
 	}
 	toNanos := uint64(0)
 	if toProfileEntry != nil {
-		toNanos = toProfileEntry.CoinEntry.DeSoLockedNanos
+		toNanos = toProfileEntry.CreatorCoinEntry.DeSoLockedNanos
 	}
 
 	// Add an operation to the list at the end indicating we've swapped identities.
@@ -896,6 +903,23 @@ func (bav *UtxoView) _connectSwapIdentity(
 	return totalInput, totalOutput, utxoOpsForTxn, nil
 }
 
+func _verifyBytesSignature(signer, data, signature []byte) error {
+	bytes := Sha256DoubleHash(data)
+
+	// Convert signature to *btcec.Signature.
+	sign, err := btcec.ParseDERSignature(signature, btcec.S256())
+	if err != nil {
+		return errors.Wrapf(err, "_verifyBytesSignature: Problem parsing access signature: ")
+	}
+
+	// Verify signature.
+	ownerPk, _ := btcec.ParsePubKey(signer, btcec.S256())
+	if !sign.Verify(bytes[:], ownerPk) {
+		return fmt.Errorf("_verifyBytesSignature: Invalid signature")
+	}
+	return nil
+}
+
 // _verifyAccessSignature verifies if the accessSignature is correct. Valid
 // accessSignature is the signed hash of (derivedPublicKey + expirationBlock)
 // in DER format, made with the ownerPublicKey.
@@ -903,47 +927,26 @@ func _verifyAccessSignature(ownerPublicKey []byte, derivedPublicKey []byte,
 	expirationBlock uint64, accessSignature []byte) error {
 
 	// Sanity-check and convert ownerPublicKey to *btcec.PublicKey.
-	if len(ownerPublicKey) != btcec.PubKeyBytesLenCompressed {
-		fmt.Errorf("_verifyAccessSignature: Problem parsing owner public key")
-	}
-	ownerPk, err := btcec.ParsePubKey(ownerPublicKey, btcec.S256())
-	if err != nil {
-		return errors.Wrapf(err, "_verifyAccessSignature: Problem parsing owner public key: ")
+	if err := IsByteArrayValidPublicKey(ownerPublicKey); err != nil {
+		return errors.Wrapf(err, "_verifyAccessSignature: Problem parsing owner public key")
 	}
 
 	// Sanity-check and convert derivedPublicKey to *btcec.PublicKey.
-	if len(derivedPublicKey) != btcec.PubKeyBytesLenCompressed {
-		fmt.Errorf("_verifyAccessSignature: Problem parsing derived public key")
-	}
-	_, err = btcec.ParsePubKey(derivedPublicKey, btcec.S256())
-	if err != nil {
-		return errors.Wrapf(err, "_verifyAccessSignature: Problem parsing derived public key: ")
+	if err := IsByteArrayValidPublicKey(derivedPublicKey); err != nil {
+		return errors.Wrapf(err, "_verifyAccessSignature: Problem parsing derived public key")
 	}
 
 	// Compute a hash of derivedPublicKey+expirationBlock.
 	expirationBlockBytes := EncodeUint64(expirationBlock)
 	accessBytes := append(derivedPublicKey, expirationBlockBytes[:]...)
-	accessHash := Sha256DoubleHash(accessBytes)
-
-	// Convert accessSignature to *btcec.Signature.
-	signature, err := btcec.ParseDERSignature(accessSignature, btcec.S256())
-	if err != nil {
-		return errors.Wrapf(err, "_verifyAccessSignature: Problem parsing access signature: ")
-	}
-
-	// Verify signature.
-	if !signature.Verify(accessHash[:], ownerPk) {
-		return fmt.Errorf("_verifyAccessSignature: Invalid signature")
-	}
-
-	return nil
+	return _verifyBytesSignature(ownerPublicKey, accessBytes, accessSignature)
 }
 
 func (bav *UtxoView) _connectAuthorizeDerivedKey(
 	txn *MsgDeSoTxn, txHash *BlockHash, blockHeight uint32, verifySignatures bool) (
 	_totalInput uint64, _totalOutput uint64, _utxoOps []*UtxoOperation, _err error) {
 
-	if blockHeight < NFTTransferOrBurnAndDerivedKeysBlockHeight {
+	if blockHeight < bav.Params.ForkHeights.NFTTransferOrBurnAndDerivedKeysBlockHeight {
 		return 0, 0, nil, RuleErrorDerivedKeyBeforeBlockHeight
 	}
 
