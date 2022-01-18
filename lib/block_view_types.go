@@ -1,10 +1,15 @@
 package lib
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec"
+	"github.com/holiman/uint256"
+	"github.com/pkg/errors"
+	"io"
+	"reflect"
 	"strings"
 )
 
@@ -23,8 +28,9 @@ const (
 	UtxoTypeNFTSeller                UtxoType = 6
 	UtxoTypeNFTBidderChange          UtxoType = 7
 	UtxoTypeNFTCreatorRoyalty        UtxoType = 8
+	UtxoTypeNFTAdditionalDESORoyalty UtxoType = 9
 
-	// NEXT_TAG = 9
+	// NEXT_TAG = 10
 )
 
 func (mm UtxoType) String() string {
@@ -98,8 +104,11 @@ const (
 	OperationTypeAcceptNFTTransfer            OperationType = 21
 	OperationTypeBurnNFT                      OperationType = 22
 	OperationTypeAuthorizeDerivedKey          OperationType = 23
+	OperationTypeMessagingKey                 OperationType = 24
+	OperationTypeDAOCoin                      OperationType = 25
+	OperationTypeDAOCoinTransfer              OperationType = 26
 
-	// NEXT_TAG = 24
+	// NEXT_TAG = 27
 )
 
 func (op OperationType) String() string {
@@ -196,6 +205,18 @@ func (op OperationType) String() string {
 		{
 			return "OperationTypeAuthorizeDerivedKey"
 		}
+	case OperationTypeMessagingKey:
+		{
+			return "OperationTypeMessagingKey"
+		}
+	case OperationTypeDAOCoin:
+		{
+			return "OperationTypeDAOCoin"
+		}
+	case OperationTypeDAOCoinTransfer:
+		{
+			return "OperationTypeDAOCoinTransfer"
+		}
 	}
 	return "OperationTypeUNKNOWN"
 }
@@ -263,6 +284,9 @@ type UtxoOperation struct {
 	// For disconnecting AuthorizeDerivedKey transactions.
 	PrevDerivedKeyEntry *DerivedKeyEntry
 
+	// For disconnecting MessagingGroupKey transactions.
+	PrevMessagingKeyEntry *MessagingGroupEntry
+
 	// Save the previous repost entry and repost count when making an update.
 	PrevRepostEntry *RepostEntry
 	PrevRepostCount uint64
@@ -270,6 +294,11 @@ type UtxoOperation struct {
 	// Save the state of a creator coin prior to updating it due to a
 	// buy/sell/add transaction.
 	PrevCoinEntry *CoinEntry
+
+	// Save the state of coin entries associated with a PKID prior to updating
+	// it due to an additional coin royalty when an NFT is sold.
+	PrevCoinRoyaltyCoinEntries map[PKID]CoinEntry
+
 	// Save the creator coin balance of both the transactor and the creator.
 	// We modify the transactor's balances when they buys/sell a creator coin
 	// and we modify the creator's balance when we pay them a founder reward.
@@ -305,13 +334,22 @@ type UtxoOperation struct {
 	// These values are used by Rosetta in order to create input and output
 	// operations. They make it so that we don't have to reconnect all txns
 	// in order to get these values.
-	AcceptNFTBidCreatorPublicKey    []byte
-	AcceptNFTBidBidderPublicKey     []byte
-	AcceptNFTBidCreatorRoyaltyNanos uint64
+	AcceptNFTBidCreatorPublicKey        []byte
+	AcceptNFTBidBidderPublicKey         []byte
+	AcceptNFTBidCreatorRoyaltyNanos     uint64
+	AcceptNFTBidAdditionalCoinRoyalties []*PublicKeyRoyaltyPair
+
+	// These values are used by Rosetta in order to create input and output
+	// operations. They make it so that we don't have to reconnect all txns
+	// in order to get these values for NFT bid transactions on Buy Now NFTs.
+	NFTBidCreatorPublicKey        []byte
+	NFTBidBidderPublicKey         []byte
+	NFTBidCreatorRoyaltyNanos     uint64
+	NFTBidAdditionalCoinRoyalties []*PublicKeyRoyaltyPair
 }
 
 func (utxoEntry *UtxoEntry) String() string {
-	return fmt.Sprintf("< PublicKey: %v, BlockHeight: %d, AmountNanos: %d, UtxoType: %v, "+
+	return fmt.Sprintf("< OwnerPublicKey: %v, BlockHeight: %d, AmountNanos: %d, UtxoType: %v, "+
 		"isSpent: %v, utxoKey: %v>", PkToStringMainnet(utxoEntry.PublicKey),
 		utxoEntry.BlockHeight, utxoEntry.AmountNanos,
 		utxoEntry.UtxoType, utxoEntry.isSpent, utxoEntry.UtxoKey)
@@ -345,13 +383,13 @@ func MakePkMapKey(pk []byte) PkMapKey {
 
 func MakeMessageKey(pk []byte, tstampNanos uint64) MessageKey {
 	return MessageKey{
-		PublicKey:   MakePkMapKey(pk),
+		PublicKey:   *NewPublicKey(pk),
 		TstampNanos: tstampNanos,
 	}
 }
 
 type MessageKey struct {
-	PublicKey   PkMapKey
+	PublicKey   PublicKey
 	BlockHeight uint32
 	TstampNanos uint64
 }
@@ -368,8 +406,8 @@ func (mm *MessageKey) StringKey(params *DeSoParams) string {
 
 // MessageEntry stores the essential content of a message transaction.
 type MessageEntry struct {
-	SenderPublicKey    []byte
-	RecipientPublicKey []byte
+	SenderPublicKey    *PublicKey
+	RecipientPublicKey *PublicKey
 	EncryptedText      []byte
 	// TODO: Right now a sender can fake the timestamp and make it appear to
 	// the recipient that she sent messages much earlier than she actually did.
@@ -386,9 +424,318 @@ type MessageEntry struct {
 	isDeleted bool
 
 	// Indicates message encryption method
-	// Version = 2 : message encrypted using shared secret
+	// Version = 3 : message encrypted using rotating keys and group chats.
+	// Version = 2 : message encrypted using shared secrets
 	// Version = 1 : message encrypted using public key
 	Version uint8
+
+	// DeSo V3 Messages fields
+
+	// SenderMessagingPublicKey is the sender's messaging public key that was used
+	// to encrypt the corresponding message.
+	SenderMessagingPublicKey *PublicKey
+
+	// SenderMessagingGroupKeyName is the sender's key name of SenderMessagingPublicKey
+	SenderMessagingGroupKeyName *GroupKeyName
+
+	// RecipientMessagingPublicKey is the recipient's messaging public key that was
+	// used to encrypt the corresponding message.
+	RecipientMessagingPublicKey *PublicKey
+
+	// RecipientMessagingGroupKeyName is the recipient's key name of RecipientMessagingPublicKey
+	RecipientMessagingGroupKeyName *GroupKeyName
+}
+
+func (message *MessageEntry) Encode() []byte {
+	var data []byte
+
+	data = append(data, EncodeByteArray(message.SenderPublicKey[:])...)
+	data = append(data, EncodeByteArray(message.RecipientPublicKey[:])...)
+	data = append(data, EncodeByteArray(message.EncryptedText)...)
+	data = append(data, UintToBuf(message.TstampNanos)...)
+	data = append(data, UintToBuf(uint64(message.Version))...)
+	data = append(data, EncodeByteArray(message.SenderMessagingPublicKey[:])...)
+	data = append(data, EncodeByteArray(message.SenderMessagingGroupKeyName[:])...)
+	data = append(data, EncodeByteArray(message.RecipientMessagingPublicKey[:])...)
+	data = append(data, EncodeByteArray(message.RecipientMessagingGroupKeyName[:])...)
+	return data
+}
+
+func (message *MessageEntry) Decode(data []byte) error {
+	rr := bytes.NewReader(data)
+
+	senderPublicKeyBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding sender public key")
+	}
+	message.SenderPublicKey = NewPublicKey(senderPublicKeyBytes)
+
+	recipientPublicKeyBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding recipient public key")
+	}
+	message.RecipientPublicKey = NewPublicKey(recipientPublicKeyBytes)
+
+	message.EncryptedText, err = DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding encrypted bytes")
+	}
+
+	message.TstampNanos, err = ReadUvarint(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding timestamp")
+	}
+
+	versionBytes, err := ReadUvarint(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding version")
+	}
+	message.Version = uint8(versionBytes)
+
+	senderMessagingPublicKeyBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding sender messaging public key")
+	}
+	message.SenderMessagingPublicKey = NewPublicKey(senderMessagingPublicKeyBytes)
+
+	senderMessagingKeyName, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding sender messaging key name")
+	}
+	message.SenderMessagingGroupKeyName = NewGroupKeyName(senderMessagingKeyName)
+
+	recipientMessagingPublicKeyBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding recipient messaging public key")
+	}
+	message.RecipientMessagingPublicKey = NewPublicKey(recipientMessagingPublicKeyBytes)
+
+	recipientMessagingKeyName, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding recipient messaging key name")
+	}
+	message.RecipientMessagingGroupKeyName = NewGroupKeyName(recipientMessagingKeyName)
+	return nil
+}
+
+// GroupKeyName helps with handling key names in MessagingGroupKey
+type GroupKeyName [MaxMessagingKeyNameCharacters]byte
+
+func (name *GroupKeyName) ToBytes() []byte {
+	return name[:]
+}
+
+// Encode message key from varying length to a MaxMessagingKeyNameCharacters.
+// We fill the length of the messaging key to make sure there are no weird
+// prefix overlaps in DB.
+func NewGroupKeyName(groupKeyName []byte) *GroupKeyName {
+	name := GroupKeyName{}
+
+	// Fill with 0s to the MaxMessagingKeyNameCharacters.
+	for {
+		if len(groupKeyName) < MaxMessagingKeyNameCharacters {
+			groupKeyName = append(groupKeyName, []byte{0}...)
+		} else {
+			copy(name[:], groupKeyName)
+			return &name
+		}
+	}
+}
+
+// Decode filled message key of length MaxMessagingKeyNameCharacters array.
+func MessagingKeyNameDecode(name *GroupKeyName) []byte {
+
+	bytes := make([]byte, MaxMessagingKeyNameCharacters)
+	copy(bytes, name[:])
+
+	// Return empty byte array if we have a non-existent key.
+	if reflect.DeepEqual(bytes, (*NewGroupKeyName([]byte{}))[:]) {
+		return []byte{}
+	}
+
+	// Remove trailing 0s from the encoded message key.
+	for {
+		if len(bytes) > MinMessagingKeyNameCharacters && bytes[len(bytes)-1] == byte(0) {
+			bytes = bytes[:len(bytes)-1]
+		} else {
+			return bytes
+		}
+	}
+}
+
+func EqualGroupKeyName(a, b *GroupKeyName) bool {
+	return reflect.DeepEqual(a.ToBytes(), b.ToBytes())
+}
+
+func BaseGroupKeyName() *GroupKeyName {
+	return NewGroupKeyName([]byte{})
+}
+
+func DefaultGroupKeyName() *GroupKeyName {
+	return NewGroupKeyName([]byte("default-key"))
+}
+
+// MessagingGroupKey is similar to the MessageKey, and is used to index messaging keys for a user.
+type MessagingGroupKey struct {
+	OwnerPublicKey PublicKey
+	GroupKeyName   GroupKeyName
+}
+
+func NewMessagingGroupKey(ownerPublicKey *PublicKey, groupKeyName []byte) *MessagingGroupKey {
+	return &MessagingGroupKey{
+		OwnerPublicKey: *ownerPublicKey,
+		GroupKeyName:   *NewGroupKeyName(groupKeyName),
+	}
+}
+
+func (key *MessagingGroupKey) String() string {
+	return fmt.Sprintf("<OwnerPublicKey: %v, GroupKeyName: %v",
+		key.OwnerPublicKey, key.GroupKeyName)
+}
+
+// MessagingGroupEntry is used to update messaging keys for a user, this was added in
+// the DeSo V3 Messages protocol.
+type MessagingGroupEntry struct {
+	// GroupOwnerPublicKey represents the owner public key of the user who created
+	// this group. This key is what is used to index the group metadata in the db.
+	GroupOwnerPublicKey *PublicKey
+
+	// MessagingPublicKey is the key others will use to encrypt messages. The
+	// GroupOwnerPublicKey is used for indexing, but the MessagingPublicKey is the
+	// actual key used to encrypt/decrypt messages.
+	MessagingPublicKey *PublicKey
+
+	// MessagingGroupKeyName is the name of the messaging key. This is used to identify
+	// the message public key. You can pass any 8-32 character string (byte array).
+	// The standard Messages V3 key is named "default-key"
+	MessagingGroupKeyName *GroupKeyName
+
+	// MessagingGroupMembers is a list of recipients in a group chat. Messaging keys can have
+	// multiple recipients, where the encrypted private key of the messaging public key
+	// is given to all group members.
+	MessagingGroupMembers []*MessagingGroupMember
+
+	// Whether this entry should be deleted when the view is flushed
+	// to the db. This is initially set to false, but can become true if
+	// we disconnect the messaging key from UtxoView
+	isDeleted bool
+}
+
+func (entry *MessagingGroupEntry) String() string {
+	return fmt.Sprintf("<MessagingGroupEntry: %v | MessagingPublicKey : %v | MessagingGroupKey : %v | isDeleted : %v >",
+		entry.GroupOwnerPublicKey, entry.MessagingPublicKey, entry.MessagingGroupKeyName, entry.isDeleted)
+}
+
+func (entry *MessagingGroupEntry) Encode() []byte {
+	var entryBytes []byte
+
+	entryBytes = append(entryBytes, EncodeByteArray(entry.GroupOwnerPublicKey[:])...)
+	entryBytes = append(entryBytes, EncodeByteArray(entry.MessagingPublicKey[:])...)
+	entryBytes = append(entryBytes, EncodeByteArray(entry.MessagingGroupKeyName[:])...)
+	entryBytes = append(entryBytes, UintToBuf(uint64(len(entry.MessagingGroupMembers)))...)
+	for ii := 0; ii < len(entry.MessagingGroupMembers); ii++ {
+		entryBytes = append(entryBytes, entry.MessagingGroupMembers[ii].Encode()...)
+	}
+	return entryBytes
+}
+
+func (entry *MessagingGroupEntry) Decode(data []byte) error {
+	rr := bytes.NewReader(data)
+
+	groupOwnerPublicKeyBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupEntry.Decode: Problem decoding groupOwnerPublicKeyBytes")
+	}
+	entry.GroupOwnerPublicKey = NewPublicKey(groupOwnerPublicKeyBytes)
+
+	messagingPublicKeyBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupEntry.Decode: Problem decoding messagingPublicKey")
+	}
+	entry.MessagingPublicKey = NewPublicKey(messagingPublicKeyBytes)
+
+	messagingKeyNameBytes, err := DecodeByteArray(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupEntry.Decode: Problem decoding messagingKeyName")
+	}
+	entry.MessagingGroupKeyName = NewGroupKeyName(messagingKeyNameBytes)
+
+	recipientsLen, err := ReadUvarint(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupEntry.Decode: Problem decoding recipients length")
+	}
+	for ; recipientsLen > 0; recipientsLen-- {
+		recipient := MessagingGroupMember{}
+		err = recipient.Decode(rr)
+		if err != nil {
+			return errors.Wrapf(err, "MessagingGroupEntry.Decode: Problem decoding recipient")
+		}
+
+		entry.MessagingGroupMembers = append(entry.MessagingGroupMembers, &recipient)
+	}
+
+	return nil
+}
+
+// MessagingGroupMember is used to store information about a group chat member.
+type MessagingGroupMember struct {
+	// GroupMemberPublicKey is the main public key of the group chat member.
+	// Importantly, it isn't a messaging public key.
+	GroupMemberPublicKey *PublicKey
+
+	// GroupMemberKeyName determines the key of the recipient that the
+	// encrypted key is addressed to. We allow adding recipients by their
+	// messaging keys. It suffices to specify the recipient's main public key
+	// and recipient's messaging key name for the consensus to know how to
+	// index the recipient. That's why we don't actually store the messaging
+	// public key in the MessagingGroupMember entry.
+	GroupMemberKeyName *GroupKeyName
+
+	// EncryptedKey is the encrypted messaging public key, addressed to the recipient.
+	EncryptedKey              []byte
+}
+
+func (rec *MessagingGroupMember) Encode() []byte {
+	data := []byte{}
+
+	data = append(data, UintToBuf(uint64(len(rec.GroupMemberPublicKey)))...)
+	data = append(data, rec.GroupMemberPublicKey[:]...)
+
+	data = append(data, UintToBuf(uint64(len(rec.GroupMemberKeyName)))...)
+	data = append(data, rec.GroupMemberKeyName[:]...)
+
+	data = append(data, UintToBuf(uint64(len(rec.EncryptedKey)))...)
+	data = append(data, rec.EncryptedKey...)
+
+	return data
+}
+
+func (rec *MessagingGroupMember) Decode(rr io.Reader) error {
+
+	recipientPublicKeyBytes, err := ReadVarString(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupMember.Decode: Problem reading " +
+			"GroupMemberPublicKey")
+	}
+	recipientKeyName, err := ReadVarString(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupMember.Decode: Problem reading " +
+			"GroupMemberKeyName")
+	}
+	err = ValidateGroupPublicKeyAndName(recipientPublicKeyBytes, recipientKeyName)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupMember.Decode: Problem reading " +
+			"GroupMemberPublicKey and GroupMemberKeyName")
+	}
+
+	rec.GroupMemberPublicKey = NewPublicKey(recipientPublicKeyBytes)
+	rec.GroupMemberKeyName = NewGroupKeyName(recipientKeyName)
+	rec.EncryptedKey, err = ReadVarString(rr)
+	if err != nil {
+		return errors.Wrapf(err, "MessagingGroupMember.Decode: Problem reading " +
+			"EncryptedKey")
+	}
+	return nil
 }
 
 // Entry for a public key forbidden from signing blocks.
@@ -447,6 +794,12 @@ type NFTEntry struct {
 
 	// If this NFT was transferred to the current owner, it will be pending until accepted.
 	IsPending bool
+
+	// If an NFT does not have unlockable content, it can be sold instantly at BuyNowPriceNanos.
+	IsBuyNow bool
+
+	// If an NFT is a Buy Now NFT, it can be purchased for this price.
+	BuyNowPriceNanos uint64
 
 	// Whether or not this entry is deleted in the view.
 	isDeleted bool
@@ -708,6 +1061,15 @@ type PostEntry struct {
 	NFTRoyaltyToCreatorBasisPoints uint64
 	NFTRoyaltyToCoinBasisPoints    uint64
 
+	// AdditionalNFTRoyaltiesToCreatorsBasisPoints is a map where keys are PKIDs and values are uint64s representing
+	// basis points. The user with the PKID specified should receive the basis points specified by the value as a
+	// royalty anytime this NFT is sold. This map must not contain the post creator.
+	AdditionalNFTRoyaltiesToCreatorsBasisPoints map[PKID]uint64
+	// AdditionalNFTRoyaltiesToCoinsBasisPoints is a map where keys are PKIDs and values are uint64s representing
+	// basis points. The user with the PKID specified should have the basis points specified as by the value added to
+	// the DESO locked in their profile anytime this NFT is sold. This map must not contain the post creator.
+	AdditionalNFTRoyaltiesToCoinsBasisPoints map[PKID]uint64
+
 	// ExtraData map to hold arbitrary attributes of a post. Holds non-consensus related information about a post.
 	PostExtraData map[string][]byte
 }
@@ -741,12 +1103,13 @@ type BalanceEntryMapKey struct {
 	CreatorPKID PKID
 }
 
-func MakeCreatorCoinBalanceKey(hodlerPKID *PKID, creatorPKID *PKID) BalanceEntryMapKey {
+func MakeBalanceEntryKey(hodlerPKID *PKID, creatorPKID *PKID) BalanceEntryMapKey {
 	return BalanceEntryMapKey{
 		HODLerPKID:  *hodlerPKID,
 		CreatorPKID: *creatorPKID,
 	}
 }
+
 func (mm BalanceEntryMapKey) String() string {
 	return fmt.Sprintf("BalanceEntryMapKey: <HODLer Pub Key: %v, Creator Pub Key: %v>",
 		PkToStringBoth(mm.HODLerPKID[:]), PkToStringBoth(mm.CreatorPKID[:]))
@@ -763,13 +1126,30 @@ type BalanceEntry struct {
 	CreatorPKID *PKID
 
 	// How much this HODLer owns of a particular creator coin.
-	BalanceNanos uint64
+	BalanceNanos uint256.Int
 
 	// Has the hodler purchased any amount of this user's coin
 	HasPurchased bool
 
 	// Whether or not this entry is deleted in the view.
 	isDeleted bool
+}
+
+type TransferRestrictionStatus uint8
+
+const (
+	TransferRestrictionStatusUnrestricted            TransferRestrictionStatus = 0
+	TransferRestrictionStatusProfileOwnerOnly        TransferRestrictionStatus = 1
+	TransferRestrictionStatusDAOMembersOnly          TransferRestrictionStatus = 2
+	TransferRestrictionStatusPermanentlyUnrestricted TransferRestrictionStatus = 3
+)
+
+func (transferRestrictionStatus TransferRestrictionStatus) IsUnrestricted() bool {
+	if transferRestrictionStatus == TransferRestrictionStatusUnrestricted ||
+		transferRestrictionStatus == TransferRestrictionStatusPermanentlyUnrestricted {
+		return true
+	}
+	return false
 }
 
 // This struct contains all the information required to support coin
@@ -796,7 +1176,15 @@ type CoinEntry struct {
 	// The number of coins currently in circulation. Whenever a user buys a
 	// coin from the protocol this increases, and whenever a user sells a
 	// coin to the protocol this decreases.
-	CoinsInCirculationNanos uint64
+	//
+	// It's OK to have a pointer here as long as we *NEVER* manipulate the
+	// bigint in place. Instead, we must always do computations of the form:
+	//
+	// CoinsInCirculationNanos = uint256.NewInt(0).Add(CoinsInCirculationNanos, <other uint256>)
+	//
+	// This will guarantee that modifying a copy of this struct will not break
+	// the original, which is needed for disconnects to work.
+	CoinsInCirculationNanos uint256.Int
 
 	// This field keeps track of the highest number of coins that has ever
 	// been in circulation. It is used to determine when a creator should
@@ -804,7 +1192,21 @@ type CoinEntry struct {
 	// coins being minted would push the number of coins in circulation
 	// beyond the watermark, we allocate a percentage of the coins being
 	// minted to the creator as a "founder reward."
+	//
+	// Note that this field doesn't need to be uint256 because it's only
+	// relevant for CreatorCoins, which can't exceed math.MaxUint64 in total
+	// supply.
 	CoinWatermarkNanos uint64
+
+	// If true, DAO coins can no longer be minted.
+	MintingDisabled bool
+
+	TransferRestrictionStatus TransferRestrictionStatus
+}
+
+type PublicKeyRoyaltyPair struct {
+	PublicKey          []byte
+	RoyaltyAmountNanos uint64
 }
 
 type PKIDEntry struct {
@@ -817,7 +1219,7 @@ type PKIDEntry struct {
 }
 
 func (pkid *PKIDEntry) String() string {
-	return fmt.Sprintf("< PKID: %s, PublicKey: %s >", PkToStringMainnet(pkid.PKID[:]), PkToStringMainnet(pkid.PublicKey))
+	return fmt.Sprintf("< PKID: %s, OwnerPublicKey: %s >", PkToStringMainnet(pkid.PKID[:]), PkToStringMainnet(pkid.PublicKey))
 }
 
 type ProfileEntry struct {
@@ -841,11 +1243,18 @@ type ProfileEntry struct {
 	// profiles in certain situations.
 	IsHidden bool
 
-	// CoinEntry tracks the information required to buy/sell coins on a user's
+	// CreatorCoinEntry tracks the information required to buy/sell creator coins on a user's
 	// profile. We "embed" it here for convenience so we can access the fields
 	// directly on the ProfileEntry object. Embedding also makes it so that we
 	// don't need to initialize it explicitly.
-	CoinEntry
+	CreatorCoinEntry CoinEntry
+
+	// DAOCoinEntry tracks the information around the DAO coins issued on a user's profile.
+	// Note: the following fields are basically ignored for the DAOCoinEntry
+	// 1. CreatorBasisPoints
+	// 2. DeSoLockedNanos
+	// 3. CoinWaterMarkNanos
+	DAOCoinEntry CoinEntry
 
 	// Whether or not this entry should be deleted when the view is flushed
 	// to the db. This is initially set to false, but can become true if for
@@ -856,4 +1265,33 @@ type ProfileEntry struct {
 
 func (pe *ProfileEntry) IsDeleted() bool {
 	return pe.isDeleted
+}
+
+func EncodeByteArray(bytes []byte) []byte {
+	data := []byte{}
+
+	data = append(data, UintToBuf(uint64(len(bytes)))...)
+	data = append(data, bytes...)
+
+	return data
+}
+
+func DecodeByteArray(reader io.Reader) ([]byte, error) {
+	pkLen, err := ReadUvarint(reader)
+	if err != nil {
+		return nil, errors.Wrapf(err, "DecodeByteArray: Problem when ReadUvarint")
+	}
+
+	if pkLen > 0 {
+		result := make([]byte, pkLen)
+
+		_, err = io.ReadFull(reader, result)
+		if err != nil {
+			return nil, errors.Wrapf(err, "DecodeByteArray: Problem when ReadFull")
+		}
+
+		return result, nil
+	} else {
+		return []byte{}, nil
+	}
 }
