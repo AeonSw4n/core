@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"sort"
 )
 
 func (bav *UtxoView) _setNFTEntryMappings(nftEntry *NFTEntry) {
@@ -483,7 +484,10 @@ func (bav *UtxoView) extractAdditionalRoyaltyMap(
 				"Problem reading bytes for additional royalties: ")
 		}
 		// Check that public keys are valid and sum basis points
-		for pkBytess, bps := range additionalRoyaltiesByPubKey {
+		for pkBytesIter, bps := range additionalRoyaltiesByPubKey {
+			// Make a copy of the iterator
+			pkBytess := pkBytesIter
+
 			// Validate the public key
 			if _, err = btcec.ParsePubKey(pkBytess[:], btcec.S256()); err != nil {
 				return nil, 0, errors.Wrapf(
@@ -495,7 +499,7 @@ func (bav *UtxoView) extractAdditionalRoyaltyMap(
 			additionalRoyalties[*pkid.PKID] = bps
 
 			// Check for overflow when summing the bps
-			if additionalRoyaltiesBasisPoints > math.MaxUint64 - bps {
+			if additionalRoyaltiesBasisPoints > math.MaxUint64-bps {
 				return nil, 0, errors.Wrapf(
 					RuleErrorAdditionalCoinRoyaltyOverflow,
 					"additionalRoyaltiesBasisPoints: %v, bps: %v", additionalRoyaltiesBasisPoints, bps)
@@ -978,7 +982,8 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 	// Additionally save all the other previous coin entries
 	prevAdditionalCoinEntries := make(map[PKID]CoinEntry)
 	profileEntriesMap := make(map[PKID]ProfileEntry)
-	for pkid, _ := range nftPostEntry.AdditionalNFTRoyaltiesToCoinsBasisPoints {
+	for pkidIter, _ := range nftPostEntry.AdditionalNFTRoyaltiesToCoinsBasisPoints {
+		pkid := pkidIter
 		pkBytes := bav.GetPublicKeyForPKID(&pkid)
 		existingAdditionalProfileEntry := bav.GetProfileEntryForPublicKey(pkBytes)
 		if existingAdditionalProfileEntry == nil || existingAdditionalProfileEntry.isDeleted {
@@ -1043,7 +1048,8 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 			PkToStringBoth(nftPostEntry.PosterPublicKey))
 	}
 	desoRoyaltiesBalancesBefore := make(map[PKID]uint64)
-	for pkid, _ := range nftPostEntry.AdditionalNFTRoyaltiesToCreatorsBasisPoints {
+	for pkidIter, _ := range nftPostEntry.AdditionalNFTRoyaltiesToCreatorsBasisPoints {
+		pkid := pkidIter
 		pkBytes := bav.GetPublicKeyForPKID(&pkid)
 		balanceBefore, err := bav.GetSpendableDeSoBalanceNanosForPublicKey(pkBytes, tipHeight)
 		if err != nil {
@@ -1177,7 +1183,8 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 		_additionalRoyaltiesNanos uint64, _additionalRoyalties []*PublicKeyRoyaltyPair, _err error) {
 		additionalRoyaltiesNanos := uint64(0)
 		var additionalRoyalties []*PublicKeyRoyaltyPair
-		for pkid, bps := range royaltyMap {
+		for pkidIter, bps := range royaltyMap {
+			pkid := pkidIter
 			royaltyNanos := IntDiv(
 				IntMul(
 					big.NewInt(int64(args.BidAmountNanos)),
@@ -1203,6 +1210,21 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 				})
 			}
 		}
+		// We must sort the royalties in a deterministic way or else the UTXOs that we
+		// generate for the royalties will have a random order. This would cause one node
+		// to believe UTXO zero is some value, while another node believes it to be a
+		// different value because it put a different UTXO in that index.
+		sort.Slice(additionalRoyalties,  func(ii, jj int) bool {
+			iiPkStr := PkToString(additionalRoyalties[ii].PublicKey, bav.Params)
+			jjPkStr := PkToString(additionalRoyalties[jj].PublicKey, bav.Params)
+			// Generally, we should never have to break a tie because a public key
+			// cannot appear in the royalties more than once. But we do it here just
+			// to be safe.
+			if iiPkStr == jjPkStr {
+				return additionalRoyalties[ii].RoyaltyAmountNanos < additionalRoyalties[jj].RoyaltyAmountNanos
+			}
+			return iiPkStr < jjPkStr
+		})
 		return additionalRoyaltiesNanos, additionalRoyalties, nil
 	}
 
@@ -1290,8 +1312,10 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 	// This may start negative but that's OK because the first thing we do is increment it
 	// in createUTXO
 	nextUtxoIndex := len(args.Txn.TxOutputs) - 1
-	createUTXO := func(amountNanos uint64, publicKey []byte, utxoType UtxoType) (_err error) {
-		// nextUtxoIndex is guaranteed to be >= 0 afer this increment
+	createUTXO := func(amountNanos uint64, publicKeyArg []byte, utxoType UtxoType) (_err error) {
+		publicKey := publicKeyArg
+
+		// nextUtxoIndex is guaranteed to be >= 0 after this increment
 		nextUtxoIndex += 1
 		royaltyOutputKey := &UtxoKey{
 			TxID:  *args.TxHash,
@@ -1336,7 +1360,8 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 	}
 
 	// (4-a) Pay DESO royalties to any additional royalties specified
-	for _, publicKeyRoyaltyPair := range additionalDESORoyalties {
+	for _, publicKeyRoyaltyPairIter := range additionalDESORoyalties {
+		publicKeyRoyaltyPair := publicKeyRoyaltyPairIter
 		if publicKeyRoyaltyPair.RoyaltyAmountNanos > 0 {
 			if err = createUTXO(publicKeyRoyaltyPair.RoyaltyAmountNanos, publicKeyRoyaltyPair.PublicKey,
 				UtxoTypeNFTAdditionalDESORoyalty); err != nil {
@@ -1419,8 +1444,12 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 		transactionUtxoOp.AcceptNFTBidCreatorPublicKey = nftPostEntry.PosterPublicKey
 		transactionUtxoOp.AcceptNFTBidBidderPublicKey = bidderPublicKey
 		transactionUtxoOp.AcceptNFTBidCreatorRoyaltyNanos = creatorCoinRoyaltyNanos
+		transactionUtxoOp.AcceptNFTBidCreatorDESORoyaltyNanos = creatorRoyaltyNanos
 		if len(additionalCoinRoyalties) > 0 {
 			transactionUtxoOp.AcceptNFTBidAdditionalCoinRoyalties = additionalCoinRoyalties
+		}
+		if len(additionalDESORoyalties) > 0 {
+			transactionUtxoOp.AcceptNFTBidAdditionalDESORoyalties = additionalDESORoyalties
 		}
 	} else if args.Txn.TxnMeta.GetTxnType() == TxnTypeNFTBid {
 		transactionUtxoOp.Type = OperationTypeNFTBid
@@ -1428,8 +1457,12 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 		transactionUtxoOp.NFTBidCreatorPublicKey = nftPostEntry.PosterPublicKey
 		transactionUtxoOp.NFTBidBidderPublicKey = bidderPublicKey
 		transactionUtxoOp.NFTBidCreatorRoyaltyNanos = creatorCoinRoyaltyNanos
+		transactionUtxoOp.NFTBidCreatorDESORoyaltyNanos = creatorRoyaltyNanos
 		if len(additionalCoinRoyalties) > 0 {
 			transactionUtxoOp.NFTBidAdditionalCoinRoyalties = additionalCoinRoyalties
+		}
+		if len(additionalDESORoyalties) > 0 {
+			transactionUtxoOp.NFTBidAdditionalDESORoyalties = additionalDESORoyalties
 		}
 	} else {
 		return 0, 0, nil, fmt.Errorf(
@@ -1437,7 +1470,7 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 			args.Txn.TxnMeta.GetTxnType())
 	}
 
-	// Add an operation to the list at the end indicating we've connected an NFT bid.
+	// Add an operation to the list at the end indicating we've connected an NFT bid or Accept NFT Bid transaction.
 	utxoOpsForTxn = append(utxoOpsForTxn, transactionUtxoOp)
 
 	// HARDCORE SANITY CHECK:
@@ -1481,7 +1514,8 @@ func (bav *UtxoView) _helpConnectNFTSold(args HelpConnectNFTSoldStruct) (
 	creatorPlusCoinDiff := big.NewInt(0).Add(big.NewInt(creatorDiff), big.NewInt(coinDiff))
 	// Compute additional DESO royalties diff
 	additionalDESORoyaltiesDiff := big.NewInt(0)
-	for pkid, balanceBefore := range desoRoyaltiesBalancesBefore {
+	for pkidIter, balanceBefore := range desoRoyaltiesBalancesBefore {
+		pkid := pkidIter
 		// Only relevant if additional royalty recipient != seller && != bidder (note: creator cannot be specified in
 		// additional DESO (or coin) royalties maps, so we do not need to check against that public key)
 		pkBytes := bav.GetPublicKeyForPKID(&pkid)
@@ -2267,7 +2301,8 @@ func (bav *UtxoView) _helpDisconnectNFTSold(operationData *UtxoOperation, nftPos
 
 	// (5-a) Revert the additional coin royalties CoinEntries if they exist.
 	if operationData.PrevCoinRoyaltyCoinEntries != nil {
-		for pkid, coinEntry := range operationData.PrevCoinRoyaltyCoinEntries {
+		for pkidIter, coinEntry := range operationData.PrevCoinRoyaltyCoinEntries {
+			pkid := pkidIter
 			profileEntry := bav.GetProfileEntryForPKID(&pkid)
 			if profileEntry == nil || profileEntry.isDeleted {
 				return errors.New("_helpDisconnectNFTSold: profile entry was nil or deleted for additional" +

@@ -161,7 +161,10 @@ func (bav *UtxoView) GetProfileEntryForUsername(nonLowercaseUsername []byte) *Pr
 	}
 }
 
-func (bav *UtxoView) GetPKIDForPublicKey(publicKey []byte) *PKIDEntry {
+func (bav *UtxoView) GetPKIDForPublicKey(publicKeyArg []byte) *PKIDEntry {
+	// Make a copy of the publicKey to make sure it won't shift under our feet
+	publicKey := publicKeyArg
+
 	// If an entry exists in the in-memory map, return the value of that mapping.
 	mapValue, existsMapValue := bav.PublicKeyToPKIDEntry[MakePkMapKey(publicKey)]
 	if existsMapValue {
@@ -197,7 +200,13 @@ func (bav *UtxoView) GetPKIDForPublicKey(publicKey []byte) *PKIDEntry {
 	}
 }
 
-func (bav *UtxoView) GetPublicKeyForPKID(pkid *PKID) []byte {
+func (bav *UtxoView) GetPublicKeyForPKID(pkidArg *PKID) []byte {
+	// Put this check in place, since sometimes people accidentally
+	// pass a pointer that shouldn't be copied.
+	pkid := &PKID{}
+	if pkidArg != nil {
+		*pkid = *pkidArg
+	}
 	// If an entry exists in the in-memory map, return the value of that mapping.
 	mapValue, existsMapValue := bav.PKIDToPublicKey[*pkid]
 	if existsMapValue {
@@ -490,7 +499,8 @@ func (bav *UtxoView) GetProfilesForUsernamePrefixByCoinValue(usernamePrefix stri
 
 	lowercaseUsernamePrefixString := strings.ToLower(usernamePrefix)
 	var profileEntrys []*ProfileEntry
-	for _, pk := range pubKeysMap {
+	for _, pkIter := range pubKeysMap {
+		pk := pkIter
 		pkid := bav.GetPKIDForPublicKey(pk).PKID
 		profile := bav.GetProfileEntryForPKID(pkid)
 		// Double-check that a username matches the prefix.

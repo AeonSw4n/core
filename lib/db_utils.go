@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/holiman/uint256"
 	"io"
 	"log"
 	"math"
@@ -1751,7 +1752,8 @@ func DbGetPubKeysYouFollow(handle *badger.DB, yourPubKey []byte) (
 
 	// Convert the pkids to public keys
 	followPubKeys := [][]byte{}
-	for _, fpkid := range followPKIDs {
+	for _, fpkidIter := range followPKIDs {
+		fpkid := fpkidIter
 		followPk := DBGetPublicKeyForPKID(handle, fpkid)
 		followPubKeys = append(followPubKeys, followPk)
 	}
@@ -1771,7 +1773,8 @@ func DbGetPubKeysFollowingYou(handle *badger.DB, yourPubKey []byte) (
 
 	// Convert the pkids to public keys
 	followPubKeys := [][]byte{}
-	for _, fpkid := range followPKIDs {
+	for _, fpkidIter := range followPKIDs {
+		fpkid := fpkidIter
 		followPk := DBGetPublicKeyForPKID(handle, fpkid)
 		followPubKeys = append(followPubKeys, followPk)
 	}
@@ -2893,7 +2896,9 @@ func PutBlockWithTxn(txn *badger.Txn, desoBlock *MsgDeSoBlock) error {
 			pubKeyToBlockRewardMap[pkMapKey] += bro.AmountNanos
 		}
 	}
-	for pkMapKey, blockReward := range pubKeyToBlockRewardMap {
+	for pkMapKeyIter, blockReward := range pubKeyToBlockRewardMap {
+		pkMapKey := pkMapKeyIter
+
 		blockRewardKey := PublicKeyBlockHashToBlockRewardKey(pkMapKey[:], blockHash)
 		if err := txn.Set(blockRewardKey, EncodeUint64(blockReward)); err != nil {
 			return err
@@ -3589,6 +3594,19 @@ type CreatorCoinTransferTxindexMetadata struct {
 	PostHashHex                string
 }
 
+type DAOCoinTransferTxindexMetadata struct {
+	CreatorUsername        string
+	DAOCoinToTransferNanos uint256.Int
+}
+
+type DAOCoinTxindexMetadata struct {
+	CreatorUsername           string
+	OperationType             string
+	CoinsToMintNanos          uint256.Int
+	CoinsToBurnNanos          uint256.Int
+	TransferRestrictionStatus string
+}
+
 type UpdateProfileTxindexMetadata struct {
 	ProfilePublicKeyBase58Check string
 
@@ -3643,24 +3661,46 @@ type SwapIdentityTxindexMetadata struct {
 	ToDeSoLockedNanos   uint64
 }
 
+type NFTRoyaltiesMetadata struct {
+	CreatorCoinRoyaltyNanos     uint64
+	CreatorRoyaltyNanos         uint64
+	CreatorPublicKeyBase58Check string
+	// We omit the maps when empty to save some space.
+	AdditionalCoinRoyaltiesMap map[string]uint64 `json:",omitempty"`
+	AdditionalDESORoyaltiesMap map[string]uint64 `json:",omitempty"`
+}
+
 type NFTBidTxindexMetadata struct {
-	NFTPostHashHex string
-	SerialNumber   uint64
-	BidAmountNanos uint64
-	IsBuyNowBid    bool
+	NFTPostHashHex            string
+	SerialNumber              uint64
+	BidAmountNanos            uint64
+	IsBuyNowBid               bool
+	OwnerPublicKeyBase58Check string
+	// We omit the empty object here as a bid that doesn't trigger a "buy now" operation will have no royalty metadata
+	NFTRoyaltiesMetadata `json:",omitempty"`
 }
 
 type AcceptNFTBidTxindexMetadata struct {
-	NFTPostHashHex              string
-	SerialNumber                uint64
-	BidAmountNanos              uint64
-	CreatorCoinRoyaltyNanos     uint64
-	CreatorPublicKeyBase58Check string
+	NFTPostHashHex string
+	SerialNumber   uint64
+	BidAmountNanos uint64
+	NFTRoyaltiesMetadata
 }
 
 type NFTTransferTxindexMetadata struct {
 	NFTPostHashHex string
 	SerialNumber   uint64
+}
+
+type CreateNFTTxindexMetadata struct {
+	NFTPostHashHex             string
+	AdditionalCoinRoyaltiesMap map[string]uint64 `json:",omitempty"`
+	AdditionalDESORoyaltiesMap map[string]uint64 `json:",omitempty"`
+}
+
+type UpdateNFTTxindexMetadata struct {
+	NFTPostHashHex string
+	IsForSale      bool
 }
 
 type TransactionMetadata struct {
@@ -3691,6 +3731,10 @@ type TransactionMetadata struct {
 	NFTBidTxindexMetadata              *NFTBidTxindexMetadata              `json:",omitempty"`
 	AcceptNFTBidTxindexMetadata        *AcceptNFTBidTxindexMetadata        `json:",omitempty"`
 	NFTTransferTxindexMetadata         *NFTTransferTxindexMetadata         `json:",omitempty"`
+	DAOCoinTxindexMetadata             *DAOCoinTxindexMetadata             `json:",omitempty"`
+	DAOCoinTransferTxindexMetadata     *DAOCoinTransferTxindexMetadata     `json:",omitempty"`
+	CreateNFTTxindexMetadata           *CreateNFTTxindexMetadata           `json:",omitempty"`
+	UpdateNFTTxindexMetadata           *UpdateNFTTxindexMetadata           `json:",omitempty"`
 }
 
 func DBCheckTxnExistenceWithTxn(txn *badger.Txn, txID *BlockHash) bool {
@@ -3808,7 +3852,9 @@ func DbPutTxindexTransactionMappingsWithTxn(
 	publicKeys := _getPublicKeysForTxn(txn, txnMeta, params)
 
 	// For each public key found, add the txID from its list.
-	for pkFound := range publicKeys {
+	for pkFoundIter := range publicKeys {
+		pkFound := pkFoundIter
+
 		// Simply add a new entry for each of the public keys found.
 		if err := DbPutTxindexPublicKeyToTxnMappingSingleWithTxn(dbTx, pkFound[:], txID); err != nil {
 			return err
@@ -3843,7 +3889,8 @@ func DbDeleteTxindexTransactionMappingsWithTxn(
 	publicKeys := _getPublicKeysForTxn(txn, txnMeta, params)
 
 	// For each public key found, delete the txID mapping from the db.
-	for pkFound := range publicKeys {
+	for pkFoundIter := range publicKeys {
+		pkFound := pkFoundIter
 		if err := DbDeleteTxindexPublicKeyToTxnMappingSingleWithTxn(dbTxn, pkFound[:], txID); err != nil {
 			return err
 		}
@@ -5776,7 +5823,8 @@ func DBGetProfilesByUsernamePrefixAndDeSoLocked(
 	// Have to do this to convert the PKIDs back into public keys
 	// TODO: We should clean things up around public keys vs PKIDs
 	pubKeysMap := make(map[PkMapKey][]byte)
-	for _, pkidBytes := range pkidsFound {
+	for _, pkidBytesIter := range pkidsFound {
+		pkidBytes := pkidBytesIter
 		if len(pkidBytes) != btcec.PubKeyBytesLenCompressed {
 			continue
 		}
@@ -5797,7 +5845,8 @@ func DBGetProfilesByUsernamePrefixAndDeSoLocked(
 
 	// Sigh.. convert the public keys *back* into PKIDs...
 	profilesFound := []*ProfileEntry{}
-	for _, pk := range pubKeysMap {
+	for _, pkIter := range pubKeysMap {
+		pk := pkIter
 		pkid := utxoView.GetPKIDForPublicKey(pk).PKID
 		profile := utxoView.GetProfileEntryForPKID(pkid)
 		// Double-check that a username matches the prefix.
@@ -5860,7 +5909,8 @@ func DBGetPaginatedProfilesByDeSoLocked(
 	}
 
 	profilePubKeys := [][]byte{}
-	for _, pkidBytes := range profilePKIDs {
+	for _, pkidBytesIter := range profilePKIDs {
+		pkidBytes := pkidBytesIter
 		pkid := &PKID{}
 		copy(pkid[:], pkidBytes)
 		profilePubKeys = append(profilePubKeys, DBGetPublicKeyForPKID(db, pkid))
