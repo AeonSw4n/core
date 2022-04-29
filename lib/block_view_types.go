@@ -5,16 +5,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/btcsuite/btcd/btcec"
-	"github.com/golang/glog"
-	"github.com/holiman/uint256"
-	"github.com/pkg/errors"
 	"io"
 	"math"
 	"math/big"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/btcsuite/btcd/btcec"
+	"github.com/golang/glog"
+	"github.com/holiman/uint256"
+	"github.com/pkg/errors"
 )
 
 type UtxoType uint8
@@ -106,7 +107,7 @@ const (
 
 // Txindex encoder types.
 const (
-	EncoderTypeTransactionMetadata EncoderType = 1000 + iota
+	EncoderTypeTransactionMetadata EncoderType = 1000000 + iota
 	EncoderTypeBasicTransferTxindexMetadata
 	EncoderTypeBitcoinExchangeTxindexMetadata
 	EncoderTypeCreatorCoinTxindexMetadata
@@ -300,7 +301,7 @@ func EncodeToBytes(blockHeight uint64, encoder DeSoEncoder, skipMetadata ...bool
 		data = append(data, BoolToByte(true))
 		// Encode metadata
 		if !shouldSkipMetadata {
-			data = append(data, _EncodeUint32(uint32(encoder.GetEncoderType()))...)
+			data = append(data, UintToBuf(uint64(encoder.GetEncoderType()))...)
 			data = append(data, UintToBuf(uint64(encoder.GetVersionByte(blockHeight)))...)
 		}
 		data = append(data, encoder.RawEncodeWithoutMetadata(blockHeight, skipMetadata...)...)
@@ -316,26 +317,32 @@ func EncodeToBytes(blockHeight uint64, encoder DeSoEncoder, skipMetadata ...bool
 func DecodeFromBytes(encoder DeSoEncoder, rr *bytes.Reader) (_existenceByte bool, _error error) {
 	if existenceByte, err := ReadBoolByte(rr); existenceByte && err == nil {
 
-		encoderTypeBytes := make([]byte, 4)
-		_, err := io.ReadFull(rr, encoderTypeBytes)
+		encoderType, err := ReadUvarint(rr)
 		if err != nil {
 			return false, errors.Wrapf(err, "DecodeFromBytes: Problem decoding encoder type")
 		}
-		encoderType := EncoderType(DecodeUint32(encoderTypeBytes))
+		if encoderType > math.MaxUint32 {
+			return false, errors.Wrapf(err, "DecodeFromBytes: Encoder type "+
+				"value exceeds max uint32: %v", encoderType)
+		}
 
 		// Because encoder is provided as a parameter, we just verify that the entry type matches the encoder type.
-		if !reflect.DeepEqual(encoderType, encoder.GetEncoderType()) {
+		if !reflect.DeepEqual(EncoderType(encoderType), encoder.GetEncoderType()) {
 			return false, fmt.Errorf("DecodeFromBytes: encoder type (%v) doesn't match the "+
 				"entry type (%v)", encoderType, encoder.GetEncoderType())
 		}
 
-		versionUint64, err := ReadUvarint(rr)
+		versionByte, err := ReadUvarint(rr)
 		if err != nil {
 			return false, errors.Wrapf(err, "DecodeFromBytes: Problem decoding version bytes")
 		}
-		versionByte := byte(versionUint64)
+		if versionByte > math.MaxUint8 {
+			return false, errors.Wrapf(err, "DecodeFromBytes: versionByte "+
+				"value exceeds max uint8: %v", versionByte)
+		}
 		// TODO: We should pass DeSoParams to this function instead of using GlobalParams.
-		blockHeight := VersionByteToMigrationHeight(versionByte, &GlobalDeSoParams)
+		// We don't do this for now because it's a massive refactor.
+		blockHeight := VersionByteToMigrationHeight(uint8(versionByte), &GlobalDeSoParams)
 
 		err = encoder.RawDecodeWithoutMetadata(blockHeight, rr)
 		if err != nil {
@@ -348,21 +355,22 @@ func DecodeFromBytes(encoder DeSoEncoder, rr *bytes.Reader) (_existenceByte bool
 	return false, nil
 }
 
-// CheckMigrationCondition is a suggested conditional check to be called within RawEncodeWithoutMetadata and
+// MigrationTriggered is a suggested conditional check to be called within RawEncodeWithoutMetadata and
 // RawDecodeWithoutMetadata when defining the encoding migrations for DeSoEncoders. Consult constants.go for more info.
-func CheckMigrationCondition(blockHeight uint64, migrationName MigrationName) bool {
+func MigrationTriggered(blockHeight uint64, migrationName MigrationName) bool {
 	for _, migration := range GlobalDeSoParams.EncoderMigrationHeightsList {
 		if migration.Name == migrationName {
 			return blockHeight >= migration.Height
 		}
 	}
 
-	panic(fmt.Sprintf("Problem finding a migration corresponding to migrationName (%v) check your code!", migrationName))
+	panic(fmt.Sprintf("Problem finding a migration corresponding to migrationName (%v) "+
+		"check your code!", migrationName))
 }
 
 // GetMigrationVersion can be returned in GetVersionByte when implementing DeSoEncoders. The way to do it is simply
 // calling `return GetMigrationVersion(blockHeight, [Migration Names])` where migration names are all EncoderMigrationHeights
-// that were used in RawEncodeWithoutMetadata and RawDecodeWithoutMetadata. [Migratio Names] can be simply a list of
+// that were used in RawEncodeWithoutMetadata and RawDecodeWithoutMetadata. [Migration Names] can be simply a list of
 // MigrationName strings corresponding to these EncodeMigrationHeights.
 func GetMigrationVersion(blockHeight uint64, appliedMigrationNames ...MigrationName) byte {
 	maxMigrationVersion := byte(0)

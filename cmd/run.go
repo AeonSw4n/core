@@ -57,19 +57,18 @@ func SetupRunFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("postgres-uri", "", "BETA: Use Postgres as the backing store for chain data."+
 		"When enabled, most data is stored in postgres although badger is still currently used for some state. Run your "+
 		"Postgres instance on the same machine as your node for optimal performance.")
-	cmd.PersistentFlags().Uint32("max-sync-block-height", 0, "Max sync block height")
+	cmd.PersistentFlags().Uint32("max-sync-block-height", 0,
+		"Max sync block height")
 	// Hyper Sync
 	cmd.PersistentFlags().Bool("hypersync", true, "Use hyper sync protocol for faster block syncing")
-	cmd.PersistentFlags().Bool("disable-slow-sync", false, "When enabled, the node will refuse "+
-		"to sync with any method other than Hypersync. Note that it is possible to have --hypersync enabled "+
-		"with this value set to false, in which case a node may try to sync by downloading and connecting historical txns "+
-		"if the first node it encounters does not support hypersync")
 	// Snapshot
 	cmd.PersistentFlags().Uint64("snapshot-block-height-period", 1000, "Set the snapshot epoch period. Snapshots are taken at block heights divisible by the period.")
 	// Archival mode
 	cmd.PersistentFlags().Bool("archival-mode", false, "Download all historical blocks after finishing hypersync.")
 	// Disable encoder migrations
 	cmd.PersistentFlags().Bool("disable-encoder-migrations", false, "Disable badgerDB encoder migrations")
+	// Disable slow sync
+	cmd.PersistentFlags().Bool("disable-slow-sync", false, "When set, a node will refuse to sync from a peer unless it is a hypersync peer")
 
 	// Peers
 	cmd.PersistentFlags().StringSlice("connect-ips", []string{},
