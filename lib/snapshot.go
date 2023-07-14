@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -274,6 +275,7 @@ type Snapshot struct {
 	// OperationChannel. This is done to prevent the channel from growing too large and consuming too
 	// much memory.
 	operationQueueSemaphore chan struct{}
+	myCounter               atomic.Int64
 
 	// Checksum allows us to confirm integrity of the state so that when we're syncing with peers,
 	// we are confident that data wasn't tampered with.
@@ -402,7 +404,7 @@ func NewSnapshot(mainDb *badger.DB, mainDbDirectory string, snapshotBlockHeightP
 
 	// Limit the number of items stored in the OperationChannel. Because the snapshot chunks are 100MB each,
 	// this limits the number of operations stored at one time to 20GB.
-	const maxOperationQueueSize = 20
+	const maxOperationQueueSize = 10000
 
 	// Set the snapshot.
 	snap := &Snapshot{
@@ -458,6 +460,7 @@ func (snap *Snapshot) Run() {
 			}
 			// Free up a slot in the operationQueueSemaphore, now that a chunk has been processed.
 			<-snap.operationQueueSemaphore
+			snap.myCounter.Add(-1)
 
 		case SnapshotOperationChecksumAdd:
 			if err := snap.Checksum.AddOrRemoveBytesWithMigrations(operation.checksumKey, operation.checksumValue,
